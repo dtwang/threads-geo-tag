@@ -72,8 +72,8 @@
 ### 基本使用 | Basic Usage
 
 1. **開啟 Threads 網站 | Open Threads website**
-   - 前往 [threads.net](https://www.threads.net)
-   - Go to [threads.net](https://www.threads.net)
+   - 前往 [threads.com](https://www.threads.com)
+   - Go to [threads.com](https://www.threads.com)
 
 2. **開啟側邊欄 | Open Side Panel**
    - 點擊瀏覽器工具列上的擴充功能圖示
@@ -138,21 +138,6 @@ chrome-extension/
 4. **Query Manager** 管理查詢佇列、快取與並行控制
    - Manages query queue, cache, and concurrency control
 
----
-
-## 🐛 除錯指南 | Debugging Guide
-
-詳細的除錯說明請參考 [DEBUG.md](chrome-extension/DEBUG.md)
-
-For detailed debugging instructions, please refer to [DEBUG.md](chrome-extension/DEBUG.md)
-
-### 快速除錯 | Quick Debug
-
-| Console 位置 | 日誌前綴 | 來源檔案 |
-|-------------|---------|---------|
-| 頁面 Console (F12) | `[Threads]`, `[Content]` | content.js |
-| Service Worker Console | `[Background]`, `[QueryManager]`, `[Cache]` | background.js, queryManager.js |
-| Sidepanel Console | `[Sidepanel]` | sidepanel.js |
 
 ---
 
@@ -184,3 +169,17 @@ Issues and Pull Requests are welcome!
 本擴充功能僅供個人使用，請遵守 Threads 的服務條款。所顯示的位置資訊來自用戶公開的個人資料。
 
 This extension is for personal use only. Please comply with Threads' Terms of Service. The displayed location information comes from users' public profiles.
+
+---
+
+## 👤 作者 | Author
+
+[@geoff_spacetime](https://www.threads.com/@geoff_spacetime)
+
+---
+
+## 📚 使用說明 | Documentation
+
+詳細使用說明請參閱 | For detailed documentation, please visit:
+
+👉 [https://ddo-taiwan.gitbook.io/toolkit/ss/threads-geo-tag/](https://ddo-taiwan.gitbook.io/toolkit/ss/threads-geo-tag/)
