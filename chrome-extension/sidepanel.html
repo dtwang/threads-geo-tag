@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>小黃標-Threads 用戶所在地標籤</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <div class="container">
+    <h1>小黃標-Threads 用戶所在地標籤 v0.9.0</h1>
+
+    <div class="welcome-section">
+      <h2>歡迎使用</h2>
+      <ol class="instructions">
+      	<li>開啟此工具面板後，會自動在每位用戶名稱旁加入<span class="location-tag">所在地標籤</span>。點擊[查詢]即可在新分頁中自動查詢該用戶的位置。</li>
+	<li>若不需要此功能，只要關閉側邊欄，即可同時移除頁面上所有所在地標籤。</li>      </ol>
+    </div>
+
+    <div id="statusBar" class="status-bar">就緒</div>
+
+    <details class="advanced-section" id="advancedSection">
+      <summary class="advanced-toggle">進階功能...</summary>
+      <div class="advanced-content">
+        <div class="control-group">
+          <label class="checkbox-container">
+            <input type="checkbox" id="keepTabCheckbox">
+            <span class="checkbox-label">查詢後保留結果分頁</span>
+          </label>
+          <p class="option-description">此選項開啟時，會保留所開啟的查詢結果分頁，可供查看查詢結果，以及該用戶其他資訊。</p>
+          <div class="sub-option" id="keepTabFilterContainer" style="display: none;">
+            <label for="keepTabFilterInput">僅保留結果不符合：</label>
+            <input type="text" id="keepTabFilterInput" value="Taiwan" style="width: 120px;">
+          </div>
+        </div>
+
+        <div class="control-group">
+          <label class="checkbox-container">
+            <input type="checkbox" id="autoQueryVisibleCheckbox">
+            <span class="checkbox-label">自動查詢</span>
+          </label>
+          <p class="option-description">此選項開啟時，不用手動點擊，程式會自動開啟分頁進行查詢。
+            會控制每次最多開啟分頁數量，請自行視網路與電腦速度，控制檢視與查詢的速度。
+          </p>
+          <div class="sub-option">
+            <label for="maxConcurrentInput">同時最多查詢分頁數量：</label>
+            <input type="number" id="maxConcurrentInput" min="1" max="10" value="3" style="width: 60px;">
+          </div>
+        </div>
+        
+        <div class="user-count-display">
+          <span id="userCountLabel">已顯示標籤: <strong id="userCount">0</strong></span>
+          <button id="manualDetectBtn" class="manual-detect-btn" title="手動加入標籤">手動加入標籤</button>
+          <span id="progressLabel" style="display: none;"> | 查詢進度: <strong id="queryProgress">0/0</strong></span>
+        </div>
+
+        <div class="cache-stats-display">
+          <span id="cacheStatsLabel">本機儲存用戶所在地數量: <strong id="cacheCount" class="cache-count-clickable" title="點擊刷新統計">0</strong></span>
+          <button id="showCacheBtn" class="show-cache-btn" title="顯示所有本機保存的用戶所在地資料">顯示</button>
+          <button id="clearCacheBtn" class="clear-cache-btn" title="清除所有本機保存的用戶所在地資料">清除</button>
+        </div>
+
+        <div class="content-group">
+          <label for="contentOutput">查詢結果:</label>
+          <textarea id="contentOutput" rows="5" readonly placeholder="查詢結果將顯示在這裡..."></textarea>
+        </div>
+      </div>
+    </details>
+
+
+  </div>
+
+  <script type="module" src="sidepanel-loader.js"></script>
+</body>
+</html>
