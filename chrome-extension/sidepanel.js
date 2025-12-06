@@ -407,24 +407,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const { account, region } = request;
     console.log(`[Sidepanel] 收到查詢結果更新: ${account} - ${region}`);
 
-    // 在 currentGetUserListArray 中找到對應的用戶並更新 region
-    const userIndex = currentGetUserListArray.findIndex(u => u.account === account);
+    // 在 currentGetUserListArray 中找到所有對應的用戶並更新 region
+    let updatedCount = 0;
+    currentGetUserListArray.forEach((user, index) => {
+      if (user.account === account) {
+        currentGetUserListArray[index].region = region;
+        updatedCount++;
+      }
+    });
 
-    if (userIndex !== -1) {
-      currentGetUserListArray[userIndex].region = region;
-      console.log(`[Sidepanel] 已更新 ${account} 的地區為: ${region}`);
+    if (updatedCount > 0) {
+      console.log(`[Sidepanel] 已更新 ${updatedCount} 個 ${account} 的地區為: ${region}`);
 
       // 更新顯示
       const completedUsers = currentGetUserListArray.filter(u => u.region !== null);
       const resultText = completedUsers.map(u => `${u.account} - ${u.region || '未找到'}`).join('\n');
       contentOutput.value = `已查詢的用戶 (${completedUsers.length}/${currentGetUserListArray.length}):\n\n${resultText}`;
 
-      // 更新快取統計（延迟一点确保缓存已保存）
-      setTimeout(() => {
-        updateCacheStats();
-      }, 200);
+      // 更新快取統計
+      updateCacheStats();
 
-      sendResponse({ success: true, updated: true });
+      sendResponse({ success: true, updated: true, count: updatedCount });
     } else {
       console.log(`[Sidepanel] 找不到用戶 ${account}，無法更新`);
       sendResponse({ success: false, error: '找不到用戶' });

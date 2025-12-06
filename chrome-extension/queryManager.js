@@ -1,22 +1,23 @@
 /**
  * 查詢管理器 - 統一管理所有地區查詢
  * 提供隊列機制，限制並發查詢數量
- * 提供緩存機制，避免重複查詢
+ * 提供快取機制，避免重複查詢
  */
 
 // ==================== 隊列配置 ====================
 let queueJobMax = 3; // 最多同時處理的任務數（可動態更新）
+const queryQueueMax = 30; // 隊列最大長度
 let queryQueue = []; // 待處理的查詢隊列
 let activeQueryCount = 0; // 當前正在執行的查詢數量
 
-// ==================== 緩存配置 ====================
+// ==================== 快取配置 ====================
 const CACHE_KEY = 'regionCache'; // chrome.storage 中的鍵名
-const CACHE_EXPIRY_DAYS = 30; // 緩存過期天數（30 天）
+const CACHE_EXPIRY_DAYS = 30; // 快取過期天數（30 天）
 
-// ==================== 緩存管理 ====================
+// ==================== 快取管理 ====================
 
 /**
- * 從緩存中讀取用戶地區
+ * 從快取中讀取用戶地區
  * @param {string} username - 用戶帳號（不含 @ 符號）
  * @returns {Promise<string|null>} 返回地區或 null（未找到或已過期）
  */
@@ -32,27 +33,27 @@ async function getCachedRegion(username) {
 
       // 檢查是否過期
       if (now - cached.timestamp < expiryTime) {
-        console.log(`[Cache] 命中緩存 @${username}: ${cached.region} (保存於 ${new Date(cached.timestamp).toLocaleString()})`);
+        //console.log(`[Cache] 命中快取 @${username}: ${cached.region} (保存於 ${new Date(cached.timestamp).toLocaleString()})`);
         return cached.region;
       } else {
-        console.log(`[Cache] 緩存已過期 @${username} (保存於 ${new Date(cached.timestamp).toLocaleString()})`);
-        // 刪除過期的緩存
+        //console.log(`[Cache] 快取已過期 @${username} (保存於 ${new Date(cached.timestamp).toLocaleString()})`);
+        // 刪除過期的快取
         delete cache[username];
         await chrome.storage.local.set({ [CACHE_KEY]: cache });
         return null;
       }
     }
 
-    console.log(`[Cache] 未找到緩存 @${username}`);
+    //console.log(`[Cache] 未找到快取 @${username}`);
     return null;
   } catch (error) {
-    console.error('[Cache] 讀取緩存失敗:', error);
+    console.error('[Cache] 讀取快取失敗:', error);
     return null;
   }
 }
 
 /**
- * 將用戶地區保存到緩存
+ * 將用戶地區保存到快取
  * @param {string} username - 用戶帳號（不含 @ 符號）
  * @param {string} region - 地區
  * @returns {Promise<void>}
@@ -68,28 +69,28 @@ async function saveCachedRegion(username, region) {
     };
 
     await chrome.storage.local.set({ [CACHE_KEY]: cache });
-    console.log(`[Cache] 已保存緩存 @${username}: ${region}`);
+    console.log(`[Cache] 已保存快取 @${username}: ${region}`);
   } catch (error) {
-    console.error('[Cache] 保存緩存失敗:', error);
+    console.error('[Cache] 保存快取失敗:', error);
   }
 }
 
 /**
- * 清除所有緩存
+ * 清除所有快取
  * @returns {Promise<void>}
  */
 async function clearCache() {
   try {
     await chrome.storage.local.remove([CACHE_KEY]);
-    console.log('[Cache] 已清除所有緩存');
+    console.log('[Cache] 已清除所有快取');
   } catch (error) {
-    console.error('[Cache] 清除緩存失敗:', error);
+    console.error('[Cache] 清除快取失敗:', error);
   }
 }
 
 /**
- * 獲取緩存統計信息
- * @returns {Promise<Object>} 緩存統計信息
+ * 獲取快取統計信息
+ * @returns {Promise<Object>} 快取統計信息
  */
 async function getCacheStats() {
   try {
@@ -118,7 +119,7 @@ async function getCacheStats() {
       expiryDays: CACHE_EXPIRY_DAYS
     };
   } catch (error) {
-    console.error('[Cache] 獲取緩存統計失敗:', error);
+    console.error('[Cache] 獲取快取統計失敗:', error);
     return {
       totalCount: 0,
       validCount: 0,
@@ -129,17 +130,17 @@ async function getCacheStats() {
 }
 
 /**
- * 獲取所有緩存的用戶地區資料
- * @returns {Promise<Object>} 所有緩存資料
+ * 獲取所有快取的用戶地區資料
+ * @returns {Promise<Object>} 所有快取資料
  */
 async function getAllCachedRegions() {
   try {
     const result = await chrome.storage.local.get([CACHE_KEY]);
     const cache = result[CACHE_KEY] || {};
-    console.log(`[Cache] 獲取所有緩存資料，共 ${Object.keys(cache).length} 筆`);
+    console.log(`[Cache] 獲取所有快取資料，共 ${Object.keys(cache).length} 筆`);
     return cache;
   } catch (error) {
-    console.error('[Cache] 獲取所有緩存失敗:', error);
+    console.error('[Cache] 獲取所有快取失敗:', error);
     return {};
   }
 }
@@ -162,6 +163,11 @@ async function executeQuery(username, shouldKeepTab = false, keepTabFilter = '')
   try {
     console.log(`[QueryManager] 正在查詢 @${cleanUsername}...`);
 
+    // 隨機延遲 2-5 秒，避免同時發起太多查詢，更像真實用戶行為
+    const randomDelay = Math.random() * 2000 + 3000; // 1000-3000ms
+    console.log(`[Threads] 等待 ${Math.round(randomDelay / 1000)} 秒後查詢下一個用戶`);
+    await new Promise(resolve => setTimeout(resolve, randomDelay));
+    
     // 開啟新分頁到用戶的 Threads 個人資料頁面
     const profileUrl = `https://www.threads.com/@${cleanUsername}?hl=en`;
 
@@ -283,7 +289,7 @@ async function executeQuery(username, shouldKeepTab = false, keepTabFilter = '')
       }
       console.log(`[QueryManager] 查詢成功 @${cleanUsername}: ${region}`);
 
-      // 保存到緩存
+      // 保存到快取
       await saveCachedRegion(cleanUsername, region);
 
       return {
@@ -378,9 +384,22 @@ async function processQueryQueue() {
  * @param {string} username - 用戶帳號
  * @param {boolean} shouldKeepTab - 是否保留查詢分頁
  * @param {string} keepTabFilter - 保留分頁的過濾條件
- * @returns {Promise<{success: boolean, region?: string, error?: string}>}
+ * @returns {Promise<{success: boolean, region?: string, error?: string}>|null} 返回 null 表示無法加入隊列
  */
 function addToQueryQueue(username, shouldKeepTab = false, keepTabFilter = '') {
+  // 檢查隊列是否已滿
+  if (queryQueue.length >= queryQueueMax) {
+    console.log(`[QueryManager] 隊列已滿 (${queryQueue.length}/${queryQueueMax})，拒絕加入 @${username}`);
+    return null;
+  }
+
+  // 檢查是否已在隊列中（避免重複）
+  const isAlreadyInQueue = queryQueue.some(task => task.username === username);
+  if (isAlreadyInQueue) {
+    console.log(`[QueryManager] @${username} 已在隊列中，跳過重複加入`);
+    return null;
+  }
+
   return new Promise((resolve, reject) => {
     queryQueue.push({
       username,
@@ -390,7 +409,7 @@ function addToQueryQueue(username, shouldKeepTab = false, keepTabFilter = '') {
       reject
     });
 
-    console.log(`[QueryManager] 任務已加入隊列 @${username} (隊列長度: ${queryQueue.length})`);
+    console.log(`[QueryManager] 任務已加入隊列 @${username} (隊列長度: ${queryQueue.length}/${queryQueueMax})`);
 
     // 嘗試立即開始處理隊列
     processQueryQueue();
@@ -403,18 +422,18 @@ function addToQueryQueue(username, shouldKeepTab = false, keepTabFilter = '') {
  * 查詢用戶地區（對外接口）
  * @param {string} username - 用戶帳號
  * @param {boolean} shouldKeepTab - 是否保留查詢分頁（可選，默認從 storage 讀取）
- * @param {boolean} forceRefresh - 是否強制重新查詢（忽略緩存，可選，默認 false）
+ * @param {boolean} forceRefresh - 是否強制重新查詢（忽略快取，可選，默認 false）
  * @returns {Promise<{success: boolean, region?: string, error?: string, fromCache?: boolean}>}
  */
 async function queryUserRegion(username, shouldKeepTab = null, forceRefresh = false) {
   // 移除 @ 符號（如果有的話）
   const cleanUsername = username.startsWith('@') ? username.slice(1) : username;
 
-  // 如果不是強制刷新，先檢查緩存
+  // 如果不是強制刷新，先檢查快取
   if (!forceRefresh) {
     const cachedRegion = await getCachedRegion(cleanUsername);
     if (cachedRegion !== null) {
-      console.log(`[QueryManager] 使用緩存數據 @${cleanUsername}: ${cachedRegion}`);
+      console.log(`[QueryManager] 使用快取數據 @${cleanUsername}: ${cachedRegion}`);
       return {
         success: true,
         region: cachedRegion,
@@ -422,7 +441,7 @@ async function queryUserRegion(username, shouldKeepTab = null, forceRefresh = fa
       };
     }
   } else {
-    console.log(`[QueryManager] 強制刷新，忽略緩存 @${cleanUsername}`);
+    console.log(`[QueryManager] 強制刷新，忽略快取 @${cleanUsername}`);
   }
 
   // 如果未指定 shouldKeepTab，從 chrome.storage 讀取
@@ -448,9 +467,20 @@ async function queryUserRegion(username, shouldKeepTab = null, forceRefresh = fa
     }
   }
 
-  // 沒有緩存或強制刷新，加入隊列執行查詢
+  // 沒有快取或強制刷新，加入隊列執行查詢
   console.log(`[QueryManager] 查詢參數: shouldKeepTab=${shouldKeepTab}, keepTabFilter="${keepTabFilter}"`);
-  return addToQueryQueue(cleanUsername, shouldKeepTab, keepTabFilter);
+  const queueResult = addToQueryQueue(cleanUsername, shouldKeepTab, keepTabFilter);
+  
+  // 如果無法加入隊列（隊列已滿或已存在），返回失敗
+  if (queueResult === null) {
+    return {
+      success: false,
+      region: null,
+      fromCache: null
+    };
+  }
+  
+  return queueResult;
 }
 
 /**
@@ -460,6 +490,7 @@ async function queryUserRegion(username, shouldKeepTab = null, forceRefresh = fa
 function getQueueStatus() {
   return {
     queueLength: queryQueue.length,
+    queueMax: queryQueueMax,
     activeQueryCount: activeQueryCount,
     maxConcurrent: queueJobMax
   };

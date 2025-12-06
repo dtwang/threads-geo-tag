@@ -254,7 +254,7 @@ function getAllUsersOnPage() {
 
 
   try {
-    const usersMap = new Map(); // 使用 Map 避免重複，key 為帳號名稱
+    const usersMap = new Map(); // 使用 Map 避免重複，key 為 element（同一帳號可能有多個元件）
 
     // 找出所有符合 <a href="/@xxx" role="link"> 的元素
     const userLinks = document.querySelectorAll('a[role="link"][href*="/@"]');
@@ -286,9 +286,9 @@ function getAllUsersOnPage() {
         }
         const account = `@${username}`;
 
-        // 如果這個帳號還沒記錄過，就加入 Map
-        if (!usersMap.has(account)) {
-          usersMap.set(account, {
+        // 使用 element 作為 key，避免同一帳號多個元件被忽略
+        if (!usersMap.has(link)) {
+          usersMap.set(link, {
             account: account,
             element: link
           });
@@ -532,8 +532,8 @@ async function autoClickAboutProfileAndGetRegion() {
 
     console.log('[Threads] 找到 "More" 按鈕:', moreButton);
 
-    // 隨機等待 1-3 秒後再點擊，避免被當成自動化程式
-    const randomDelay1 = Math.random() * 2000 + 1000; 
+    // 隨機等待 2-5 秒後再點擊，避免被當成自動化程式
+    const randomDelay1 = Math.random() * 3000 + 2000; 
     console.log(`[Threads] 等待 ${Math.round(randomDelay1)}ms 後點擊 "More" 按鈕`);
     await waitForMilliseconds(randomDelay1);
 
@@ -567,8 +567,8 @@ async function autoClickAboutProfileAndGetRegion() {
 
     console.log('[Threads] 找到 "About this profile" 按鈕:', aboutButton);
 
-    // 隨機等待 1-3 秒後再點擊，避免被當成自動化程式
-    const randomDelay2 = Math.random() * 2000 + 1000; 
+    // 隨機等待 2-5 秒後再點擊，避免被當成自動化程式
+    const randomDelay2 = Math.random() * 3000 + 2000; 
     console.log(`[Threads] 等待 ${Math.round(randomDelay2)}ms 後點擊 "About this profile" 按鈕`);
     await waitForMilliseconds(randomDelay2);
 
@@ -796,6 +796,8 @@ function showRegionLabelsOnPage(regionData) {
         // 更新文字（選擇文字 span，不是三角形 span）
         const labelTextSpan = existingLabel.querySelector('.threads-label-text') || existingLabel;
         const newText = region ? `所在地：${region}` : `所在地：待查詢`;
+
+        //console.log(`[Threads] 更新標籤文字 ${account}: ${region}`);
 
         if (labelTextSpan === existingLabel) {
           // 舊版標籤（沒有 span），需要重建
@@ -1262,13 +1264,16 @@ async function autoQueryVisibleUsers() {
     // 找出尚未查詢的用戶（檢查標籤是否存在且為待查詢狀態）
     const unqueriedVisibleUsers = visibleUsers.filter(user => {
       const existingLabel = user.element.querySelector('.threads-region-label');
-      if (!existingLabel) return true; // 沒有標籤，需要查詢
+      if (!existingLabel) {
+        //console.log(`[Threads] ${user.account} 沒有標籤，需要查詢`);
+        return true; // 沒有標籤，需要查詢
+      }
 
       // 1. 檢查標籤文字是否為「查詢中」
       const labelTextSpan = existingLabel.querySelector('.threads-label-text') || existingLabel;
       const labelText = (labelTextSpan.textContent || labelTextSpan.innerText || '').trim();
       if (labelText.includes('查詢中')) {
-        console.log(`[Threads] ${user.account} 正在查詢中，跳過`);
+        //console.log(`[Threads] ${user.account} 正在查詢中，跳過`);
         return false; // 正在查詢中，跳過
       }
 
@@ -1278,9 +1283,11 @@ async function autoQueryVisibleUsers() {
 
       // 如果不是待查詢狀態（已經有其他顏色），表示已查詢過（有 region 資料）
       if (!isWaitingToQuery) {
-        console.log(`[Threads] ${user.account} 已查詢過（背景色: ${bgColor}），跳過`);
+        //console.log(`[Threads] ${user.account} 已查詢過（背景色: ${bgColor}），跳過`);
         return false; // 已查詢過，跳過
       }
+
+      //console.log(`[Threads] ${user.account} bgColor ${bgColor}`);
 
       // 待查詢且不是查詢中
       return true;
@@ -1301,11 +1308,6 @@ async function autoQueryVisibleUsers() {
         if (queryButton) {
           console.log(`[Threads] 自動查詢: ${user.account}`);
           queryButton.click();
-
-          // 隨機延遲 2-6 秒，避免同時發起太多查詢，更像真實用戶行為
-          const randomDelay = Math.random() * 3000 + 2000; // 2000-6000ms
-          console.log(`[Threads] 等待 ${Math.round(randomDelay / 1000)} 秒後查詢下一個用戶`);
-          await new Promise(resolve => setTimeout(resolve, randomDelay));
         }
       }
     }
