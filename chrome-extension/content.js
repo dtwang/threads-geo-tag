@@ -325,37 +325,16 @@ function findUserRegion(account) {
   const username = account.startsWith('@') ? account.slice(1) : account;
 
   try {
-    // 方法 1: 在用戶個人資料頁面上查找
+    //在用戶個人資料頁面上查找
     if (url.includes(`/@${username}`)) {
       // 在個人資料頁面
       const region = findRegionOnProfilePage();
       if (region) return region;
     }
-
-    // 方法 2: 在頁面上查找該用戶的貼文
-    const userLinks = document.querySelectorAll(`a[href*="/@${username}"]`);
-
-    for (const link of userLinks) {
-      const region = findUserRegionFromElement(link);
-      if (region) return region;
+    else
+    {
+      return null;
     }
-
-    // 方法 3: 搜尋包含該用戶名稱的文字
-    const allText = document.body.innerText;
-    const lines = allText.split('\n');
-
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].includes(`@${username}`) || lines[i].includes(username)) {
-        // 檢查附近的行是否有國家資訊
-        // 常見的國家標註可能在用戶名稱的下一行或同一行
-        for (let j = Math.max(0, i - 2); j < Math.min(lines.length, i + 3); j++) {
-          const region = extractRegionFromText(lines[j]);
-          if (region) return region;
-        }
-      }
-    }
-
-    return null;
   } catch (error) {
     console.log('findUserRegion 錯誤:', error);
     return `錯誤: ${error.message}`;
@@ -1403,6 +1382,139 @@ function initScrollListener() {
   }
 
 
+function findProfilePageFollowerElement() {
+  // 1️⃣ 找到所有「粉絲 / followers」span
+  const targets = [...document.querySelectorAll('span')]
+    .filter(el => /^(粉絲|followers)$/i.test(el.textContent.trim()));
+
+  for (const target of targets) {
+    // 2️⃣ 由該 span 往上找 role="tablist"（最多 10 層）
+    let current = target;
+    let tablist = null;
+
+    for (let i = 0; i < 10 && current; i++) {
+      if (
+        current.tagName === 'DIV' &&
+        current.getAttribute('role') === 'tablist'
+      ) {
+        tablist = current;
+        break;
+      }
+      current = current.parentElement;
+    }
+
+    // 3️⃣ tablist 的 parent
+    const parentDiv = tablist?.parentElement;
+
+    // 4️⃣ parent 的下一個 sibling
+    const result = parentDiv?.nextElementSibling;
+
+    // ✅ 找到第一個有效的就回傳
+    if (result) {
+      return result;
+    }
+  }
+
+  // ❌ 都沒找到
+  return null;
+}
+
+// ==================== URL 變化監聽（SPA 支援）====================
+
+/**
+ * 設置用戶資料頁的粉絲頁滾動監聽器
+ * 當切換到用戶資料頁時調用
+ */
+let profilePageCheckTimer = null;
+let profilePageHasAddedScrollListener = false;
+
+function setupProfilePageFollowerListener() {
+  const currentUrl = window.location.href;
+  const threadsProfileRegex = /^https:\/\/www\.threads\.com\/@[^/]+$/;
+
+  // 清除之前的計時器
+  if (profilePageCheckTimer) {
+    clearInterval(profilePageCheckTimer);
+    profilePageCheckTimer = null;
+  }
+
+  // 重置狀態
+  profilePageHasAddedScrollListener = false;
+
+  if (!threadsProfileRegex.test(currentUrl)) {
+    return;
+  }
+
+  console.log('[Threads] 檢測到用戶資料頁，幫粉絲頁加入事件監聽器');
+
+  profilePageCheckTimer = setInterval(() => {
+    if (profilePageHasAddedScrollListener) return;
+
+    const element = findProfilePageFollowerElement();
+
+    console.log('[Threads] 查看粉絲頁元素', element);
+
+    if (element) {
+      element.addEventListener(
+        'scroll',
+        () => handlePageScroll(false),
+        { passive: true }
+      );
+
+      profilePageHasAddedScrollListener = true;
+      clearInterval(profilePageCheckTimer);
+      profilePageCheckTimer = null;
+    }
+  }, 10000); // 每 10 秒檢查一次
+}
+
+/**
+ * 處理 URL 變化
+ */
+let lastUrl = window.location.href;
+
+function handleUrlChange() {
+  const currentUrl = window.location.href;
+  
+  if (currentUrl === lastUrl) {
+    return;
+  }
+
+  console.log('[Threads] URL 變化:', lastUrl, '->', currentUrl);
+  lastUrl = currentUrl;
+
+  // 重新設置用戶資料頁的粉絲頁監聽器
+  setupProfilePageFollowerListener();
+}
+
+/**
+ * 初始化 URL 變化監聽器
+ */
+function initUrlChangeListener() {
+  // 監聽 popstate（瀏覽器前進/後退）
+  window.addEventListener('popstate', handleUrlChange);
+
+  // 攔截 pushState 和 replaceState（SPA 路由變化）
+  const originalPushState = history.pushState;
+  const originalReplaceState = history.replaceState;
+
+  history.pushState = function(...args) {
+    originalPushState.apply(this, args);
+    handleUrlChange();
+  };
+
+  history.replaceState = function(...args) {
+    originalReplaceState.apply(this, args);
+    handleUrlChange();
+  };
+
+  // 備用方案：定時輪詢 URL 變化（某些 SPA 可能不觸發 pushState/replaceState）
+  setInterval(() => {
+    handleUrlChange();
+  }, 1000); // 每秒檢查一次
+
+  console.log('[Threads] URL 變化監聽器已初始化（含輪詢備用）');
+}
 
 /**
  * 初始化頁面功能
@@ -1420,8 +1532,14 @@ function initPageFeatures() {
   // 啟動捲動監聽器
   initScrollListener();
 
-  // 延遲 5 秒後執行第一次的 handlePageScroll
-  console.log('[Threads] 將在 5 秒後執行第一次 handlePageScroll');
+  // 初始化 URL 變化監聽器
+  initUrlChangeListener();
+
+  // 用戶資料頁，幫粉絲頁加入事件監聽器
+  setupProfilePageFollowerListener();
+
+  // 延遲後執行第一次的 handlePageScroll
+  console.log('[Threads] 將在 2 秒後執行第一次 handlePageScroll');
   setTimeout(() => {
     console.log('[Threads] 執行第一次 handlePageScroll');
     handlePageScroll(true);

@@ -165,10 +165,39 @@ async function executeQuery(username, shouldKeepTab = false, keepTabFilter = '')
     // 開啟新分頁到用戶的 Threads 個人資料頁面
     const profileUrl = `https://www.threads.com/@${cleanUsername}?hl=en`;
 
-    newTab = await chrome.tabs.create({
+    // 尋找有開啟 threads.com 的視窗
+    let targetWindowId = null;
+    try {
+      const allWindows = await chrome.windows.getAll({ populate: true });
+      if (allWindows.length > 1) {
+        // 有多個視窗時，尋找有 threads.com 分頁的視窗
+        for (const win of allWindows) {
+          const hasThreadsTab = win.tabs?.some(tab => 
+            tab.url && tab.url.includes('threads.com')
+          );
+          if (hasThreadsTab) {
+            targetWindowId = win.id;
+            console.log(`[QueryManager] 找到有 threads.com 的視窗: ${targetWindowId}`);
+            break;
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[QueryManager] 尋找視窗時發生錯誤:', error);
+    }
+
+    // 建立新分頁的選項
+    const createOptions = {
       url: profileUrl,
       active: false // 在背景開啟，不切換過去
-    });
+    };
+    
+    // 如果找到目標視窗，指定在該視窗開啟
+    if (targetWindowId !== null) {
+      createOptions.windowId = targetWindowId;
+    }
+
+    newTab = await chrome.tabs.create(createOptions);
 
     // 等待新分頁載入完成
     await new Promise((resolve) => {

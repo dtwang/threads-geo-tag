@@ -1,12 +1,11 @@
 {
   "manifest_version": 3,
   "name": "小黃標-Threads User Location Tag",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "description": "將 Threads 用戶所在地資訊，自動顯示在小黃標籤上。 Automatically extracts and reveals location for quick identification.",
   "permissions": [
     "sidePanel",
     "activeTab",
-    "scripting",
     "tabs",
     "storage"
   ],
