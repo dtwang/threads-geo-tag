@@ -31,7 +31,7 @@ async function getOpenAIApiKey() {
   });
 }
 
-const LLM_SYSTEM_PROMPT = '你是一個依照用戶過去的社群回覆與發文，協助描述用戶profile的分析程式';
+const LLM_SYSTEM_PROMPT = '會依照用戶過去的社群回覆與發文，產出用戶profile標籤的分析程式';
 const TAG_SAMPLE="生活帳,生活日常,情緒宣洩,憤世抱怨,攻擊發言,酸言酸語,政治帳,立場鮮明,易怒,惡意嘲諷,人身攻擊,溫暖陪伴,真誠分享,情感支持,理性討論,仇恨言論,觀點交流,社會關懷,同理傾聽,價值探索,個人成長";
 const UF_KEYWORD="憨鳥,萊爾賴,萊爾校長,綠共,青鳥真是腦殘,賴皮寮,氫鳥,賴清德戒嚴,賴清德獨裁,賴喪,冥禁黨,賴功德"
 // ==================== 可用性檢查 ====================
@@ -189,9 +189,9 @@ async function analyzeUserProfile(socialPostContent, socialReplyContent, onProgr
 
   const useLocalLLM = await getUseLocalLLM();
 
-  const userPromptAPILLm="只有當標註『人身攻擊、仇恨言論、統戰言論』，這三個標注，要提供完整的理由，包括是依據使用者哪一個發言或回覆。如果有大量使用到統戰用語（"+UF_KEYWORD+"），或是強化中國併吞台灣的正當性論述，削弱台灣的國家意識，請標注『統戰言論』。\n 重要：直接輸出符合格式的結果：用逗號分隔每個標籤，每組標籤後面加冒號和依據理由。範例：「生活帳:分享日常瑣事,情緒宣洩:常抱怨工作」。一率不要加入『標籤結果如下：』這樣的起始文字，不要用編號。只能用繁體中文，每個標籤2-5個字。理由依據中的內容一率使用全形「，」逗號";
+  const userPromptAPILLm="只有當標註『人身攻擊、仇恨言論、統戰言論』，這三個標注，要提供完整的理由，包括是依據使用者哪一個發言或回覆。如果有大量使用到統戰用語（"+UF_KEYWORD+"），或是強化中國併吞台灣的正當性論述，削弱台灣的國家意識，請標注『統戰言論』。\n 重要：請直接輸出 JSON 格式，不要加任何前綴文字或 markdown 標記。格式為：{\"tags\":[{\"tag\":\"標籤名\",\"reason\":\"理由\"}]}。範例：{\"tags\":[{\"tag\":\"生活帳\",\"reason\":\"分享日常瑣事\"},{\"tag\":\"情緒宣洩\",\"reason\":\"常抱怨工作\"}]}。只能用繁體中文，每個標籤2-5個字。";
 
-   const userPromptLocalLLm="不要使用『人身攻擊、仇恨言論、統戰言論』標籤。務必直接輸出符合回覆格式的結果：每個標籤用逗號分隔。例如：「生活帳,情緒宣洩」。只能用繁體中文，每個標籤2-5個字.";
+   const userPromptLocalLLm="不要使用『人身攻擊、仇恨言論、統戰言論』標籤。只需要輸出標籤的結果，每個標籤間用逗號分隔。例如：「生活帳,情緒宣洩」。只能用繁體中文，每個標籤2-5個字.";
 
     const userPromptFinal = '請參考以下所提供的' + socialPostTypeString + 
       ', 依內容數量排序, 提供五個最貼切描述該用戶社群帳號展現出的風格的標籤 (舉例但不限這些: '+TAG_SAMPLE+'..). '+ ( useLocalLLM ? userPromptLocalLLm : userPromptAPILLm) + '\n\n\n' + 
@@ -264,24 +264,67 @@ async function analyzeUserProfile(socialPostContent, socialReplyContent, onProgr
     console.log(fullResponse);
     console.log('====================');
 
-    // 輸出處理：解析「標籤:理由」格式
     const MAX_TAGS = 5;
     const MAX_TAG_LENGTH = 6;
-    const tagEntries = fullResponse.trim()
-      .split(/[,]/)
-      .map(entry => {
-        const trimmed = entry.trim();
-        const colonIndex = trimmed.indexOf(':') !== -1 ? trimmed.indexOf(':') : trimmed.indexOf('：');
-        if (colonIndex > 0) {
-          const tag = trimmed.substring(0, colonIndex).trim();
-          const reason = trimmed.substring(colonIndex + 1).trim();
-          return { tag, reason };
+    let tagEntries = [];
+
+    if (useLocalLLM) {
+      // 本地 LLM：維持原本的「標籤:理由」格式解析
+      tagEntries = fullResponse.trim()
+        .split(/[,]/)
+        .map(entry => {
+          const trimmed = entry.trim();
+          const colonIndex = trimmed.indexOf(':') !== -1 ? trimmed.indexOf(':') : trimmed.indexOf('：');
+          if (colonIndex > 0) {
+            const tag = trimmed.substring(0, colonIndex).trim();
+            const reason = trimmed.substring(colonIndex + 1).trim();
+            return { tag, reason };
+          }
+          // 如果沒有冒號，整個當作標籤
+          return { tag: trimmed, reason: '' };
+        })
+        .filter(entry => entry.tag.length > 0 && entry.tag.length < MAX_TAG_LENGTH)
+        .slice(0, MAX_TAGS);
+    } else {
+      // OpenAI API：解析 JSON 格式
+      try {
+        // 移除可能的 markdown 標記
+        let jsonStr = fullResponse.trim();
+        if (jsonStr.startsWith('```json')) {
+          jsonStr = jsonStr.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+        } else if (jsonStr.startsWith('```')) {
+          jsonStr = jsonStr.replace(/^```\s*/, '').replace(/\s*```$/, '');
         }
-        // 如果沒有冒號，整個當作標籤
-        return { tag: trimmed, reason: '' };
-      })
-      .filter(entry => entry.tag.length > 0 && entry.tag.length < MAX_TAG_LENGTH)
-      .slice(0, MAX_TAGS);
+        
+        const parsed = JSON.parse(jsonStr);
+        if (parsed.tags && Array.isArray(parsed.tags)) {
+          tagEntries = parsed.tags
+            .map(item => ({
+              tag: (item.tag || '').trim(),
+              reason: (item.reason || '').trim()
+            }))
+            .filter(entry => entry.tag.length > 0 && entry.tag.length < MAX_TAG_LENGTH)
+            .slice(0, MAX_TAGS);
+        }
+      } catch (jsonError) {
+        console.warn('[LLM] JSON 解析失敗，嘗試使用舊格式解析:', jsonError);
+        // fallback：使用舊的解析方式
+        tagEntries = fullResponse.trim()
+          .split(/[,]/)
+          .map(entry => {
+            const trimmed = entry.trim();
+            const colonIndex = trimmed.indexOf(':') !== -1 ? trimmed.indexOf(':') : trimmed.indexOf('：');
+            if (colonIndex > 0) {
+              const tag = trimmed.substring(0, colonIndex).trim();
+              const reason = trimmed.substring(colonIndex + 1).trim();
+              return { tag, reason };
+            }
+            return { tag: trimmed, reason: '' };
+          })
+          .filter(entry => entry.tag.length > 0 && entry.tag.length < MAX_TAG_LENGTH)
+          .slice(0, MAX_TAGS);
+      }
+    }
 
     // 組合成「標籤:理由」格式的字串
     const processedTags = tagEntries

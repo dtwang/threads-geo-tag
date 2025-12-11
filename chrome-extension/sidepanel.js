@@ -310,9 +310,9 @@ async function showRegionLabels()
         }
       }
 
-      // 只有在拿到完整資料（地點+側寫都有）後才加入 regionData
-      // 否則不傳遞該用戶資料，讓標籤保持黃色待查詢狀態
-      if (region !== null && profile !== null) {
+      // 只要有地點或側寫其中之一，就加入 regionData
+      // 這樣可以正確顯示已查詢到的地點（即使側寫尚未取得或使用者停用側寫功能）
+      if (region !== null || profile !== null) {
         regionData[user.account] = {
           region: region,
           profile: profile
@@ -534,11 +534,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // 更新快取統計
       updateCacheStats();
 
+      // 自動刷新標籤顯示（地區更新後，需要更新頁面上的標籤）
+      showRegionLabels();
+
       sendResponse({ success: true, updated: true, count: updatedCount });
     } else {
       console.log(`[Sidepanel] 找不到用戶 ${account}，無法更新`);
       sendResponse({ success: false, error: '找不到用戶' });
     }
+    return true;
   }
 
   // 處理獲取用戶側寫請求（從 content.js 查詢）
