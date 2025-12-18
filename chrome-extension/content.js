@@ -569,8 +569,8 @@ async function autoClickAboutProfileAndGetRegion() {
 
     console.log('[Threads] 找到 "More" 按鈕:', moreButton);
 
-    // 隨機等待 1-3 秒後再點擊，避免被當成自動化程式
-    const randomDelay1 = Math.random() * 2000 + 1000; 
+    // 隨機等待 0.5-1.5 秒後再點擊，避免被當成自動化程式
+    const randomDelay1 = Math.random() * 1000 + 500; 
     console.log(`[Threads] 等待 ${Math.round(randomDelay1)}ms 後點擊 "More" 按鈕`);
     await waitForMilliseconds(randomDelay1);
 
@@ -604,8 +604,8 @@ async function autoClickAboutProfileAndGetRegion() {
 
     console.log('[Threads] 找到 "About this profile" 按鈕:', aboutButton);
 
-    // 隨機等待 1-3 秒後再點擊，避免被當成自動化程式
-    const randomDelay2 = Math.random() * 2000 + 1000; 
+    // 隨機等待 0.-1.5 秒後再點擊，避免被當成自動化程式
+    const randomDelay2 = Math.random() * 1000 + 500; 
     console.log(`[Threads] 等待 ${Math.round(randomDelay2)}ms 後點擊 "About this profile" 按鈕`);
     await waitForMilliseconds(randomDelay2);
 
@@ -615,7 +615,7 @@ async function autoClickAboutProfileAndGetRegion() {
 
     // 步驟 3: 等待 popup 出現
     console.log('[Threads] 步驟 4: 等待 popup 出現');
-    await waitForMilliseconds(1500); // 等待 popup 動畫完成
+    await waitForMilliseconds(500); // 等待 popup 動畫完成
 
     // 步驟 4: 找到 "Based in" 的 <span>
     console.log('[Threads] 步驟 5: 尋找 "Based in" 資訊');
@@ -761,7 +761,7 @@ function waitForMilliseconds(ms) {
 // 顏色判斷條件常數（方便未來調整）
 const RED_FLAG_LOCATION = 'China';
 const RED_FLAG_PROFILE_TAGS = [ '仇恨言論','統戰言論'];
-const GRAY_FLAG_PROFILE_TAGS = [ '憤世抱怨','易怒','攻擊發言','人身攻擊'];
+const GRAY_FLAG_PROFILE_TAGS = [ '憤世抱怨','易怒','攻擊發言','人身攻擊','詐騙風險','統戰言論','仇恨言論'];
 const GREEN_FLAG_LOCATION = 'Taiwan';
 const NOT_USE_RED_FLAG = true; // 由於判斷準確度有限，暫時不使用紅色標籤
 /**
@@ -917,7 +917,10 @@ function createClickableTagsElement(tagsWithReasons) {
           border-radius: 6px;
           font-size: 11px;
           font-weight: 400;
-          white-space: nowrap;
+          max-width: 280px;
+          white-space: normal;
+          word-wrap: break-word;
+          line-height: 1.4;
           z-index: 2147483647;
           box-shadow: 0 2px 8px rgba(0,0,0,0.3);
           animation: fadeIn 0.15s ease-out;

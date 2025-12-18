@@ -628,6 +628,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const analysisResult = await window.analyzeUserProfile(
             profileData.userPostContent,
             profileData.userReplyContent,
+            account,
             (progress) => {
               updateStatus(`LLM 模型下載中: ${progress}%`, 'info');
             }
@@ -1168,7 +1169,8 @@ clearProfileCacheBtn.addEventListener('click', async () => {
 
 // ==================== 手動偵測按鈕 ====================
 
-// 監聽手動偵測按鈕點擊，觸發 content.js 的 handlePageScroll
+// 監聯手動偵測按鈕點擊，觸發 content.js 的 handlePageScroll
+if (manualDetectBtn) {
 manualDetectBtn.addEventListener('click', async () => {
   try {
     console.log('[Sidepanel] 手動偵測按鈕被點擊');
@@ -1252,6 +1254,7 @@ manualDetectBtn.addEventListener('click', async () => {
     manualDetectBtn.textContent = '手動加入標籤';
   }
 });
+}
 
 // ==================== Sidepanel 初始化 ====================
 

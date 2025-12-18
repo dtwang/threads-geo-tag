@@ -5,7 +5,7 @@
  */
 
 // ==================== LLM 配置 ====================
-const OPENAI_MODEL_NAME = 'gpt-4o-mini'; // OpenAI 模型名稱
+const OPENAI_MODEL_NAME = 'gpt-5-mini'; // OpenAI 模型名稱
 
 /**
  * 從 chrome.storage 讀取是否使用本地 LLM
@@ -32,8 +32,68 @@ async function getOpenAIApiKey() {
 }
 
 const LLM_SYSTEM_PROMPT = '會依照用戶過去的社群回覆與發文，產出用戶profile標籤的分析程式';
-const TAG_SAMPLE="生活帳,生活日常,情緒宣洩,憤世抱怨,攻擊發言,酸言酸語,政治帳,立場鮮明,易怒,惡意嘲諷,人身攻擊,溫暖陪伴,真誠分享,情感支持,理性討論,仇恨言論,觀點交流,社會關懷,同理傾聽,價值探索,個人成長";
 const UF_KEYWORD="憨鳥,萊爾賴,萊爾校長,綠共,青鳥真是腦殘,賴皮寮,氫鳥,賴清德戒嚴,賴清德獨裁,賴喪,冥禁黨,賴功德"
+const TAG_SAMPLE="生活帳,生活日常,情緒宣洩,憤世抱怨,攻擊發言,酸言酸語,政治帳,立場鮮明,易怒,惡意嘲諷,人身攻擊,溫暖陪伴,真誠分享,情感支持,理性討論,仇恨言論,觀點交流,社會關懷,同理傾聽,個人成長, 詐騙風險, 刻意引戰; 相反的屬性：(生活帳 vs 政治帳) , (攻擊發言, 仇恨言論, 易怒,情緒宣洩,刻意引戰,憤世抱怨 vs 理性討論,觀點交流) , (人身攻擊,惡意嘲諷,易怒,情緒宣洩,刻意引戰,憤世抱怨 vs 溫暖陪伴, 真誠分享,情感支持,同理傾聽,個人成長) 等，需擇一不能同時出現。\n";
+const ORDER_FIRST_TAGS="詐騙風險,統戰言論,人身攻擊,仇恨言論"
+/**
+ * 解析 YAML 格式的標籤列表
+ * @param {string} yamlStr - YAML 格式字串
+ * @returns {Array<{tag: string, reason: string}>} - 解析後的標籤陣列
+ */
+function parseYamlTags(yamlStr) {
+  let content = yamlStr.trim();
+  
+  // 移除 markdown 標記
+  if (content.startsWith('```yaml')) {
+    content = content.replace(/^```yaml\s*/, '').replace(/\s*```$/, '');
+  } else if (content.startsWith('```yml')) {
+    content = content.replace(/^```yml\s*/, '').replace(/\s*```$/, '');
+  } else if (content.startsWith('```')) {
+    content = content.replace(/^```\s*/, '').replace(/\s*```$/, '');
+  }
+  
+  const result = [];
+  const lines = content.split('\n');
+  let currentItem = null;
+  
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+    if (!trimmedLine) continue;
+    
+    // 檢查是否為新項目開始 (以 - 開頭)
+    if (trimmedLine.startsWith('- ')) {
+      // 儲存前一個項目
+      if (currentItem) {
+        result.push(currentItem);
+      }
+      currentItem = { tag: '', reason: '' };
+      
+      // 嘗試解析同一行的 tag
+      const tagMatch = trimmedLine.match(/^-\s*tag:\s*["']?(.+?)["']?\s*$/);
+      if (tagMatch) {
+        currentItem.tag = tagMatch[1].trim();
+      }
+    } else if (currentItem) {
+      // 解析 tag 或 reason
+      const tagMatch = trimmedLine.match(/^tag:\s*["']?(.+?)["']?\s*$/);
+      const reasonMatch = trimmedLine.match(/^reason:\s*["']?(.+?)["']?\s*$/);
+      
+      if (tagMatch) {
+        currentItem.tag = tagMatch[1].trim();
+      } else if (reasonMatch) {
+        currentItem.reason = reasonMatch[1].trim();
+      }
+    }
+  }
+  
+  // 儲存最後一個項目
+  if (currentItem) {
+    result.push(currentItem);
+  }
+  
+  return result;
+}
+
 // ==================== 可用性檢查 ====================
 
 /**
@@ -105,7 +165,7 @@ async function callOpenAI(systemPrompt, userPrompt) {
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
         ],
-        max_completion_tokens: 2048
+        max_completion_tokens: 4096
       })
     });
 
@@ -144,10 +204,11 @@ async function callOpenAI(systemPrompt, userPrompt) {
  * 根據用戶的社群貼文和回覆內容，生成描述用戶風格的標籤
  * @param {string} socialPostContent - 用戶的貼文內容（可選）
  * @param {string} socialReplyContent - 用戶的回覆內容（可選）
+ * @param {string} targetUser - 目標用戶名稱（可選）
  * @param {function} onProgress - 下載進度回調函數（可選）
  * @returns {Promise<{success: boolean, tags?: string, error?: string}>}
  */
-async function analyzeUserProfile(socialPostContent, socialReplyContent, onProgress = null) {
+async function analyzeUserProfile(socialPostContent, socialReplyContent, targetUser = '', onProgress = null) {
   try {
     // 輸入長度限制：取前 4096 個字元
     const MAX_INPUT_LENGTH = 4096;
@@ -164,7 +225,7 @@ async function analyzeUserProfile(socialPostContent, socialReplyContent, onProgr
 
     if (socialPostContent) {
       socialPostTypeString += '貼文';
-      socialContent += '\n\n作者本人貼文:\n' + socialPostContent;
+      socialContent += '\n\n## 以下作者本人貼文:\n' + socialPostContent;
     }
 
     if (socialReplyContent) {
@@ -176,7 +237,7 @@ async function analyzeUserProfile(socialPostContent, socialReplyContent, onProgr
         socialPostTypeString += '回覆他人的貼文';
       }
 
-      socialContent += '\n\n作者回覆他人的貼文:\n' + socialReplyContent;
+      socialContent += '\n\n## 以下是作者回覆他人的貼文，要看 "'+targetUser+'" 的回覆部分:\n' + socialReplyContent;
     }
 
     // 如果沒有任何內容，返回錯誤
@@ -189,20 +250,20 @@ async function analyzeUserProfile(socialPostContent, socialReplyContent, onProgr
 
   const useLocalLLM = await getUseLocalLLM();
 
-  const userPromptAPILLm="只有當標註『人身攻擊、仇恨言論、統戰言論』，這三個標注，要提供完整的理由，包括是依據使用者哪一個發言或回覆。如果有大量使用到統戰用語（"+UF_KEYWORD+"），或是強化中國併吞台灣的正當性論述，削弱台灣的國家意識，請標注『統戰言論』。\n 重要：請直接輸出 JSON 格式，不要加任何前綴文字或 markdown 標記。格式為：{\"tags\":[{\"tag\":\"標籤名\",\"reason\":\"理由\"}]}。範例：{\"tags\":[{\"tag\":\"生活帳\",\"reason\":\"分享日常瑣事\"},{\"tag\":\"情緒宣洩\",\"reason\":\"常抱怨工作\"}]}。只能用繁體中文，每個標籤2-5個字。";
+  const userPromptAPILLm="如果有大量使用到統戰用語（"+UF_KEYWORD+"），或是強化中國併吞台灣的正當性論述，削弱台灣的國家意識，請標注『統戰言論』。\n如果作者會去回覆他人的貼文，請注意回覆有：『哥哥可以加我的賴聊天嗎』這類文字需標註詐騙風險";
 
-   const userPromptLocalLLm="不要使用『人身攻擊、仇恨言論、統戰言論』標籤。只需要輸出標籤的結果，每個標籤間用逗號分隔。例如：「生活帳,情緒宣洩」。只能用繁體中文，每個標籤2-5個字.";
+   const userPromptLocalLLm="";
 
     const userPromptFinal = '請參考以下所提供的' + socialPostTypeString + 
-      ', 依內容數量排序, 提供五個最貼切描述該用戶社群帳號展現出的風格的標籤 (舉例但不限這些: '+TAG_SAMPLE+'..). '+ ( useLocalLLM ? userPromptLocalLLm : userPromptAPILLm) + '\n\n\n' + 
+      ', 依內容數量排序, 提供五個最貼切描述該用戶社群帳號("'+targetUser+'")展現出的風格的標籤 (舉例但不限這些: '+TAG_SAMPLE+'..). '+ ( useLocalLLM ? userPromptLocalLLm : userPromptAPILLm) + '\n' + 
+      ' 也在 reason 中明確指出所依據的發言或回覆內容 '+
+      '重要：請直接輸出 YAML 格式，不要加任何前綴文字或 markdown 標記。格式範例：\n- tag: 生活帳\n  reason: 分享日常瑣事\n- tag: 情緒宣洩\n  reason: 常抱怨工作\n只能用繁體中文，每個標籤2-5個字。\n\n\n' + 
       socialContent;
       
     // 印出完整 Prompt
-    // console.log(`[LLM] 完整 Prompt:\n=== System ===\n${LLM_SYSTEM_PROMPT}\n=== User ===\n${userPromptFinal}`);
+    console.log(`[LLM] 完整 Prompt:\n=== System ===\n${LLM_SYSTEM_PROMPT}\n=== User ===\n${userPromptFinal}`);
 
     let fullResponse = '';
-
-
     
     if (useLocalLLM) {
       // ==================== 使用本地 LLM ====================
@@ -265,71 +326,43 @@ async function analyzeUserProfile(socialPostContent, socialReplyContent, onProgr
     console.log('====================');
 
     const MAX_TAGS = 5;
-    const MAX_TAG_LENGTH = 6;
+    const MAX_TAG_LENGTH = 7;
     let tagEntries = [];
 
-    if (useLocalLLM) {
-      // 本地 LLM：維持原本的「標籤:理由」格式解析
-      tagEntries = fullResponse.trim()
-        .split(/[,]/)
-        .map(entry => {
-          const trimmed = entry.trim();
-          const colonIndex = trimmed.indexOf(':') !== -1 ? trimmed.indexOf(':') : trimmed.indexOf('：');
-          if (colonIndex > 0) {
-            const tag = trimmed.substring(0, colonIndex).trim();
-            const reason = trimmed.substring(colonIndex + 1).trim();
-            return { tag, reason };
-          }
-          // 如果沒有冒號，整個當作標籤
-          return { tag: trimmed, reason: '' };
-        })
-        .filter(entry => entry.tag.length > 0 && entry.tag.length < MAX_TAG_LENGTH)
-        .slice(0, MAX_TAGS);
-    } else {
-      // OpenAI API：解析 JSON 格式
-      try {
-        // 移除可能的 markdown 標記
-        let jsonStr = fullResponse.trim();
-        if (jsonStr.startsWith('```json')) {
-          jsonStr = jsonStr.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-        } else if (jsonStr.startsWith('```')) {
-          jsonStr = jsonStr.replace(/^```\s*/, '').replace(/\s*```$/, '');
-        }
-        
-        const parsed = JSON.parse(jsonStr);
-        if (parsed.tags && Array.isArray(parsed.tags)) {
-          tagEntries = parsed.tags
-            .map(item => ({
-              tag: (item.tag || '').trim(),
-              reason: (item.reason || '').trim()
-            }))
-            .filter(entry => entry.tag.length > 0 && entry.tag.length < MAX_TAG_LENGTH)
-            .slice(0, MAX_TAGS);
-        }
-      } catch (jsonError) {
-        console.warn('[LLM] JSON 解析失敗，嘗試使用舊格式解析:', jsonError);
-        // fallback：使用舊的解析方式
-        tagEntries = fullResponse.trim()
-          .split(/[,]/)
-          .map(entry => {
-            const trimmed = entry.trim();
-            const colonIndex = trimmed.indexOf(':') !== -1 ? trimmed.indexOf(':') : trimmed.indexOf('：');
-            if (colonIndex > 0) {
-              const tag = trimmed.substring(0, colonIndex).trim();
-              const reason = trimmed.substring(colonIndex + 1).trim();
-              return { tag, reason };
-            }
-            return { tag: trimmed, reason: '' };
-          })
-          .filter(entry => entry.tag.length > 0 && entry.tag.length < MAX_TAG_LENGTH)
-          .slice(0, MAX_TAGS);
+    // 使用 YAML 解析
+    const parsedTags = parseYamlTags(fullResponse);
+    
+    if (parsedTags.length === 0) {
+      console.error('[LLM] ❌ YAML 解析失敗，無法取得標籤');
+      console.error('[LLM] 原始回應:', fullResponse);
+      return {
+        success: false,
+        error: 'YAML 解析失敗：無法取得標籤'
+      };
+    }
+    
+    tagEntries = parsedTags
+      .filter(entry => entry.tag.length > 0 && entry.tag.length < MAX_TAG_LENGTH)
+      .slice(0, MAX_TAGS);
+    console.log('[LLM] 使用 YAML 格式解析成功，取得', tagEntries.length, '個標籤');
+
+    // 組合成「標籤:理由」格式的字串（理由中的半形逗號換成全形）
+    const processedTagEntries = tagEntries
+      .map(entry => entry.reason ? `${entry.tag}:${entry.reason.replace(/,/g, '，')}` : entry.tag);
+
+    // 將 ORDER_FIRST_TAGS 中的標籤移到最前面
+    const orderFirstTagsSet = new Set(ORDER_FIRST_TAGS.split(',').map(t => t.trim()));
+    const priorityTags = [];
+    const normalTags = [];
+    for (const tagStr of processedTagEntries) {
+      const tagName = tagStr.split(':')[0];
+      if (orderFirstTagsSet.has(tagName)) {
+        priorityTags.push(tagStr);
+      } else {
+        normalTags.push(tagStr);
       }
     }
-
-    // 組合成「標籤:理由」格式的字串
-    const processedTags = tagEntries
-      .map(entry => entry.reason ? `${entry.tag}:${entry.reason}` : entry.tag)
-      .join(',');
+    const processedTags = [...priorityTags, ...normalTags].join(',');
 
     return {
       success: true,
