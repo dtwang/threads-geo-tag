@@ -4,6 +4,7 @@ const keepTabCheckbox = document.getElementById('keepTabCheckbox');
 const keepTabFilterContainer = document.getElementById('keepTabFilterContainer');
 const keepTabFilterInput = document.getElementById('keepTabFilterInput');
 const autoQueryVisibleCheckbox = document.getElementById('autoQueryVisibleCheckbox');
+const maxConcurrentContainer = document.getElementById('maxConcurrentContainer');
 const maxConcurrentInput = document.getElementById('maxConcurrentInput');
 const llmProfileAnalysisCheckbox = document.getElementById('llmProfileAnalysisCheckbox');
 const manualDetectBtn = document.getElementById('manualDetectBtn');
@@ -18,6 +19,9 @@ const clearCacheBtn = document.getElementById('clearCacheBtn');
 const profileCacheCountElement = document.getElementById('profileCacheCount');
 const showProfileCacheBtn = document.getElementById('showProfileCacheBtn');
 const clearProfileCacheBtn = document.getElementById('clearProfileCacheBtn');
+const trustListCountElement = document.getElementById('trustListCount');
+const showTrustListBtn = document.getElementById('showTrustListBtn');
+const clearTrustListBtn = document.getElementById('clearTrustListBtn');
 const openaiApiKeyInput = document.getElementById('openaiApiKeyInput');
 const apiKeyStatus = document.getElementById('apiKeyStatus');
 const apiKeySetIndicator = document.getElementById('apiKeySetIndicator');
@@ -108,6 +112,7 @@ let shouldStopAutoQuery = false;
 
 // 更新狀態欄的輔助函數
 function updateStatus(message, type = 'info') {
+  if (!statusBar) return; // 防止 DOM 未載入時報錯
   statusBar.textContent = message;
   statusBar.className = 'status-bar';
   if (type === 'error') {
@@ -120,12 +125,14 @@ function updateStatus(message, type = 'info') {
 
 // 更新用戶數量顯示的輔助函數
 function updateUserCount() {
+  if (!userCountElement) return;
   const count = currentGetUserListArray.length;
   userCountElement.textContent = count;
 }
 
 // 更新快取統計顯示的輔助函數
 async function updateCacheStats() {
+  if (!cacheCountElement) return;
   try {
     const response = await chrome.runtime.sendMessage({
       action: 'getCacheStats'
@@ -138,13 +145,14 @@ async function updateCacheStats() {
 
       cacheCountElement.textContent = validCount;
 
+      /*
       console.log(`[Sidepanel] 快取統計更新:`, {
         validCount: validCount,
         totalCount: totalCount,
         expiredCount: expiredCount,
         expiryDays: response.stats.expiryDays
       });
-
+      */
       // 如果有過期的快取，在控制台提示
       if (expiredCount > 0) {
         console.warn(`[Sidepanel] 發現 ${expiredCount} 個已過期的快取記錄`);
@@ -161,6 +169,7 @@ async function updateCacheStats() {
 
 // 更新查詢進度顯示
 function updateQueryProgress(current, total) {
+  if (!progressLabel || !queryProgress) return;
   if (total > 0) {
     progressLabel.style.display = 'inline';
     queryProgress.textContent = `${current}/${total}`;
@@ -171,6 +180,7 @@ function updateQueryProgress(current, total) {
 
 // 更新側寫快取統計顯示的輔助函數
 async function updateProfileCacheStats() {
+  if (!profileCacheCountElement) return;
   try {
     const response = await chrome.runtime.sendMessage({
       action: 'getProfileCacheStats'
@@ -183,23 +193,51 @@ async function updateProfileCacheStats() {
 
       profileCacheCountElement.textContent = validCount;
 
+      /*
       console.log(`[Sidepanel] 側寫快取統計更新:`, {
         validCount: validCount,
         totalCount: totalCount,
         expiredCount: expiredCount,
         expiryDays: response.stats.expiryDays
       });
-
+      */
       if (expiredCount > 0) {
         console.warn(`[Sidepanel] 發現 ${expiredCount} 個已過期的側寫快取記錄`);
-      }
-    } else {
+      }    } else {
       profileCacheCountElement.textContent = '0';
       console.warn('[Sidepanel] 獲取側寫快取統計失敗，響應:', response);
     }
   } catch (error) {
     console.error('[Sidepanel] 獲取側寫快取統計失敗:', error);
     profileCacheCountElement.textContent = '0';
+  }
+}
+
+// 更新手動信任清單統計顯示的輔助函數
+async function updateTrustListStats() {
+  if (!trustListCountElement) return;
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    
+    if (!tab || !tab.url || !tab.url.includes('threads.com')) {
+      trustListCountElement.textContent = '0';
+      return;
+    }
+
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      action: 'getTrustListStats'
+    });
+
+    if (response && response.success) {
+      const count = response.count || 0;
+      trustListCountElement.textContent = count;
+      console.log(`[Sidepanel] 手動信任清單統計更新: ${count}`);
+    } else {
+      trustListCountElement.textContent = '0';
+    }
+  } catch (error) {
+    console.error('[Sidepanel] 獲取手動信任清單統計失敗:', error);
+    trustListCountElement.textContent = '0';
   }
 }
 
@@ -250,11 +288,38 @@ async function queryUserRegion(username, shouldKeepTab = null) {
   }
 }
 
-async function showRegionLabels()
-{
+// 防抖計時器，避免 showRegionLabels 被頻繁調用
+let showRegionLabelsDebounceTimer = null;
+let showRegionLabelsPromiseResolve = null;
+
+/**
+ * 顯示地區標籤（帶防抖機制）
+ * 避免短時間內重複發送大量 getCachedRegion/getCachedProfile 訊息
+ */
+async function showRegionLabels() {
+  // 如果已有計時器在等待，取消它並使用新的調用
+  if (showRegionLabelsDebounceTimer) {
+    clearTimeout(showRegionLabelsDebounceTimer);
+  }
+
+  // 返回一個 Promise，在防抖延遲後執行實際邏輯
+  return new Promise((resolve) => {
+    showRegionLabelsPromiseResolve = resolve;
+    showRegionLabelsDebounceTimer = setTimeout(async () => {
+      showRegionLabelsDebounceTimer = null;
+      const result = await showRegionLabelsInternal();
+      if (showRegionLabelsPromiseResolve) {
+        showRegionLabelsPromiseResolve(result);
+        showRegionLabelsPromiseResolve = null;
+      }
+    }, 200); // 200ms 防抖延遲
+  });
+}
+
+async function showRegionLabelsInternal() {
 
   if (currentGetUserListArray.length === 0) {
-    updateStatus('請先列出用戶帳號', 'error');
+    updateStatus('等待頁面載入中...', 'info');
     return;
   }
 
@@ -283,10 +348,17 @@ async function showRegionLabels()
       } else {
         // 從快取中查詢（去掉 @ 符號）
         const username = user.account.replace(/^@/, '');
-        const cachedRegion = await getCachedRegion(username);
-        if (cachedRegion) {
-          region = cachedRegion;
-          user.region = cachedRegion; // 同步更新 user 物件
+        try {
+          const regionResponse = await chrome.runtime.sendMessage({
+            action: 'getCachedRegion',
+            username: username
+          });
+          if (regionResponse && regionResponse.success && regionResponse.region) {
+            region = regionResponse.region;
+            user.region = regionResponse.region; // 同步更新 user 物件
+          }
+        } catch (error) {
+          console.log(`[Sidepanel] 讀取地區快取失敗 ${username}:`, error);
         }
       }
 
@@ -376,6 +448,9 @@ hideLabelsBtn.addEventListener('click', async () => {
 */
 async function updateLinkList()
 {
+  // 防止 DOM 未載入時報錯
+  if (!contentOutput) return;
+  
   try {
     //updateStatus('正在取得頁面上所有用戶帳號...', 'info');
 
@@ -545,6 +620,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  // 處理刷新標籤請求（從 queryManager 關閉查詢分頁後觸發）
+  if (request.action === 'refreshRegionLabels') {
+    console.log(`[Sidepanel] 收到刷新標籤請求`);
+    showRegionLabels();
+    sendResponse({ success: true });
+    return true;
+  }
+
   // 處理獲取用戶側寫請求（從 content.js 查詢）
   if (request.action === 'getUserProfile') {
     const { account } = request;
@@ -636,7 +719,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
           if (analysisResult && analysisResult.success) {
             const profile = analysisResult.tags;
-            console.log(`[Sidepanel] LLM 分析成功 ${account}: ${profile}`);
+            //console.log(`[Sidepanel] LLM 分析成功 ${account}: ${profile}`);
 
             // 保存到快取
             await chrome.runtime.sendMessage({
@@ -674,6 +757,37 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return false;
   }
 
+  // 處理 HTTP 429 錯誤
+  if (request.action === 'handle429Error') {
+    const { errorMessage } = request;
+    console.log(`[Sidepanel] 收到 HTTP 429 錯誤: ${errorMessage}`);
+    
+    // 延遲顯示錯誤訊息，確保不會被 showRegionLabels 的訊息蓋過
+    // 等待 500ms 讓其他更新完成
+    setTimeout(() => {
+      updateStatus(errorMessage, 'error');
+    }, 500);
+    
+    // 如果「自動查詢」選項是開啟的，自動關閉它
+    if (autoQueryVisibleCheckbox && autoQueryVisibleCheckbox.checked) {
+      console.log('[Sidepanel] 自動關閉「自動查詢」選項');
+      autoQueryVisibleCheckbox.checked = false;
+      
+      // 保存到 chrome.storage
+      chrome.storage.local.set({ autoQueryVisible: false }, () => {
+        console.log('[Sidepanel] 已關閉自動查詢設定');
+      });
+      
+      // 隱藏最大並行查詢數輸入框
+      if (maxConcurrentContainer) {
+        maxConcurrentContainer.style.display = 'none';
+      }
+    }
+    
+    sendResponse({ success: true });
+    return true;
+  }
+
   return true;
 });
 
@@ -699,6 +813,8 @@ chrome.storage.local.get(['keepTabAfterQuery', 'keepTabFilter', 'autoQueryVisibl
   }
   if (result.autoQueryVisible !== undefined) {
     autoQueryVisibleCheckbox.checked = result.autoQueryVisible;
+    // 根據 checkbox 狀態顯示/隱藏最大並行查詢數輸入框
+    maxConcurrentContainer.style.display = result.autoQueryVisible ? 'block' : 'none';
     console.log('[Sidepanel] 載入自動查詢可見用戶設定:', result.autoQueryVisible);
   }
   if (result.maxConcurrentQueries !== undefined) {
@@ -736,6 +852,8 @@ autoQueryVisibleCheckbox.addEventListener('change', () => {
   chrome.storage.local.set({ autoQueryVisible: isChecked }, () => {
     console.log('[Sidepanel] 保存自動查詢可見用戶設定:', isChecked);
   });
+  // 顯示/隱藏最大並行查詢數輸入框
+  maxConcurrentContainer.style.display = isChecked ? 'block' : 'none';
 });
 
 // 監聽 maxConcurrentInput 變化，保存到 chrome.storage 並通知 background 更新 queryManager
@@ -1167,6 +1285,127 @@ clearProfileCacheBtn.addEventListener('click', async () => {
   }
 });
 
+// ==================== 顯示/清除手動信任清單按鈕 ====================
+
+// 監聽顯示手動信任清單按鈕點擊
+showTrustListBtn.addEventListener('click', async () => {
+  try {
+    console.log('[Sidepanel] 顯示手動信任清單按鈕被點擊');
+    updateStatus('正在讀取手動信任清單...', 'info');
+
+    // 禁用按鈕防止重複點擊
+    showTrustListBtn.disabled = true;
+    showTrustListBtn.textContent = '讀取中...';
+
+    // 獲取當前活動標籤頁
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+    if (!tab || !tab.url || !tab.url.includes('threads.com')) {
+      contentOutput.value = '請先開啟 Threads 頁面';
+      updateStatus('請先開啟 Threads 頁面', 'error');
+      showTrustListBtn.disabled = false;
+      showTrustListBtn.textContent = '顯示';
+      return;
+    }
+
+    // 發送獲取手動信任清單請求
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      action: 'getAllTrustList'
+    });
+
+    if (response && response.success) {
+      const trustList = response.trustList || [];
+      
+      if (trustList.length === 0) {
+        contentOutput.value = '手動信任清單為空';
+        updateStatus('手動信任清單為空', 'info');
+      } else {
+        // 格式化輸出
+        const output = trustList.map((account, index) => {
+          return `[${index + 1}] ${account}`;
+        }).join('\n');
+        
+        contentOutput.value = `手動信任清單 (共 ${trustList.length} 個用戶):\n\n${output}`;
+        updateStatus(`已載入 ${trustList.length} 個信任用戶`, 'success');
+      }
+    } else {
+      contentOutput.value = `讀取失敗: ${response?.error || '未知錯誤'}`;
+      updateStatus(`讀取失敗: ${response?.error || '未知錯誤'}`, 'error');
+    }
+
+    // 恢復按鈕狀態
+    showTrustListBtn.disabled = false;
+    showTrustListBtn.textContent = '顯示';
+
+  } catch (error) {
+    console.error('[Sidepanel] 讀取手動信任清單錯誤:', error);
+    updateStatus(`讀取錯誤: ${error.message}`, 'error');
+    contentOutput.value = `讀取錯誤: ${error.message}`;
+
+    // 恢復按鈕狀態
+    showTrustListBtn.disabled = false;
+    showTrustListBtn.textContent = '顯示';
+  }
+});
+
+// 監聽清除手動信任清單按鈕點擊
+clearTrustListBtn.addEventListener('click', async () => {
+  try {
+    // 顯示確認對話框
+    const confirmed = confirm('確定要清除所有手動信任的用戶嗎？\n\n此操作無法復原。');
+
+    if (!confirmed) {
+      console.log('[Sidepanel] 用戶取消清除手動信任清單');
+      return;
+    }
+
+    console.log('[Sidepanel] 清除手動信任清單按鈕被點擊');
+    updateStatus('正在清除手動信任清單...', 'info');
+
+    // 禁用按鈕防止重複點擊
+    clearTrustListBtn.disabled = true;
+    clearTrustListBtn.textContent = '清除中...';
+
+    // 獲取當前活動標籤頁
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+    if (!tab || !tab.url || !tab.url.includes('threads.com')) {
+      updateStatus('請先開啟 Threads 頁面', 'error');
+      clearTrustListBtn.disabled = false;
+      clearTrustListBtn.textContent = '清除';
+      return;
+    }
+
+    // 發送清除手動信任清單請求
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      action: 'clearTrustList'
+    });
+
+    if (response && response.success) {
+      updateStatus('手動信任清單已清除', 'success');
+
+      // 更新手動信任清單統計顯示
+      await updateTrustListStats();
+
+      console.log('[Sidepanel] 手動信任清單已清除');
+    } else {
+      updateStatus(`清除失敗: ${response?.error || '未知錯誤'}`, 'error');
+    }
+
+    // 恢復按鈕狀態
+    clearTrustListBtn.disabled = false;
+    clearTrustListBtn.textContent = '清除';
+
+  } catch (error) {
+    console.error('[Sidepanel] 清除手動信任清單錯誤:', error);
+    updateStatus(`清除錯誤: ${error.message}`, 'error');
+
+    // 恢復按鈕狀態
+    clearTrustListBtn.disabled = false;
+    clearTrustListBtn.textContent = '清除';
+  }
+});
+
 // ==================== 手動偵測按鈕 ====================
 
 // 監聯手動偵測按鈕點擊，觸發 content.js 的 handlePageScroll
@@ -1271,6 +1510,7 @@ console.log('[Sidepanel] 已建立與 background 的持久連接');
     // 初始化快取統計顯示
     await updateCacheStats();
     await updateProfileCacheStats();
+    await updateTrustListStats();
 
     // 自動執行手動偵測按鈕的動作
     // 延遲一小段時間確保 DOM 完全載入
@@ -1292,6 +1532,7 @@ document.addEventListener('visibilitychange', () => {
     console.log('[Sidepanel] 頁面重新可見，刷新快取統計');
     updateCacheStats();
     updateProfileCacheStats();
+    updateTrustListStats();
   }
 });
 
@@ -1300,6 +1541,7 @@ window.addEventListener('focus', () => {
   console.log('[Sidepanel] Window 獲得焦點，刷新快取統計');
   updateCacheStats();
   updateProfileCacheStats();
+  updateTrustListStats();
 });
 
 // ==================== 手動刷新快取統計 ====================
@@ -1333,6 +1575,22 @@ profileCacheCountElement.addEventListener('click', async () => {
   // 如果刷新後數字沒變，顯示一個提示
   if (profileCacheCountElement.textContent === originalText) {
     console.log('[Sidepanel] 側寫快取統計已是最新');
+  }
+});
+
+// 點擊手動信任清單統計數字可手動刷新
+trustListCountElement.addEventListener('click', async () => {
+  console.log('[Sidepanel] 用戶點擊手動信任清單統計，手動刷新');
+
+  // 顯示刷新動畫
+  const originalText = trustListCountElement.textContent;
+  trustListCountElement.textContent = '...';
+
+  await updateTrustListStats();
+
+  // 如果刷新後數字沒變，顯示一個提示
+  if (trustListCountElement.textContent === originalText) {
+    console.log('[Sidepanel] 手動信任清單統計已是最新');
   }
 });
 

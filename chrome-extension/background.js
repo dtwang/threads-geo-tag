@@ -82,7 +82,7 @@ chrome.runtime.onConnect.addListener((port) => {
 
 // 监听来自 content script 或 sidepanel 的消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log(`[Background] 收到消息:`, request.action, sender.tab ? `from tab ${sender.tab.id}` : 'from extension');
+  //console.log(`[Background] 收到消息:`, request.action, sender.tab ? `from tab ${sender.tab.id}` : 'from extension');
 
   if (request.action === 'openSidePanel') {
     chrome.sidePanel.open({ windowId: sender.tab.windowId });
@@ -91,11 +91,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // 處理手動查詢地區（從標籤上的 [查詢] 按鈕觸發）
   if (request.action === 'manualQueryRegion') {
-    const { account } = request;
+    const { account, isPriority } = request;
 
     (async () => {
       try {
-        console.log(`[Background] 開始手動查詢: ${account}`);
+        const priorityText = isPriority ? '（優先）' : '';
+        console.log(`[Background] 開始手動查詢${priorityText}: ${account}`);
 
         // 讀取設定
         const storageResult = await chrome.storage.local.get([
@@ -107,7 +108,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const keepTabFilter = storageResult.keepTabFilter || '';
         const enableProfileAnalysis = storageResult.llmProfileAnalysis || false;
 
-        console.log(`[Background] 查詢設定: keepTab=${shouldKeepTab}, filter="${keepTabFilter}", profile=${enableProfileAnalysis}`);
+        console.log(`[Background] 查詢設定: keepTab=${shouldKeepTab}, filter="${keepTabFilter}", profile=${enableProfileAnalysis}, isPriority=${isPriority || false}`);
 
         // 使用隊列機制執行整合查詢
         const queueResult = addToIntegratedQueryQueue(
@@ -126,7 +127,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }).catch(err => {
               console.log('[Background] 通知 sidepanel 進行 LLM 分析失敗:', err.message);
             });
-          }
+          },
+          isPriority || false  // 傳遞優先級參數，預設為 false（自動查詢）
         );
 
         // 如果無法加入隊列（隊列已滿或已存在），返回失敗
@@ -140,6 +142,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         // 等待查詢完成並返回結果
         const result = await queueResult;
+        console.log(`[Background] 手動查詢完成，返回結果:`, result);
         sendResponse(result);
       } catch (error) {
         console.error('[Background] 手動查詢錯誤:', error);

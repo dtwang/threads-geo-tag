@@ -6,9 +6,14 @@
 
 // ==================== 隊列配置 ====================
 let queueJobMax = 3; // 最多同時處理的任務數（可動態更新）
-const queryQueueMax = 30; // 隊列最大長度
+const queryQueueMax = 10; // 隊列最大長度
 let queryQueue = []; // 待處理的查詢隊列
 let activeQueryCount = 0; // 當前正在執行的查詢數量
+let activeQueries = new Set(); // 當前正在執行的查詢用戶名稱（用於檢查重複）
+
+// 查詢間隔延遲配置（毫秒）
+const QUERY_DELAY_MIN = 2000; // 最小延遲 2 秒
+const QUERY_DELAY_MAX = 5000; // 最大延遲 5 秒
 
 // ==================== 快取配置 ====================
 const CACHE_KEY = 'regionCache'; // chrome.storage 中的鍵名
@@ -70,9 +75,9 @@ async function saveCachedRegion(username, region) {
     };
 
     await chrome.storage.local.set({ [CACHE_KEY]: cache });
-    console.log(`[Cache] 已保存快取 @${username}: ${region}`);
+    console.log(`[Cache] 已保存 region 快取 @${username}`);
   } catch (error) {
-    console.error('[Cache] 保存快取失敗:', error);
+    console.error('[Cache] 保存 region 快取失敗:', error);
   }
 }
 
@@ -226,9 +231,9 @@ async function saveCachedProfile(username, profile) {
     };
 
     await chrome.storage.local.set({ [PROFILE_CACHE_KEY]: cache });
-    console.log(`[ProfileCache] 已保存快取 @${username}: ${profile}`);
+    console.log(`[ProfileCache] 已保存profile快取 @${username}`);
   } catch (error) {
-    console.error('[ProfileCache] 保存快取失敗:', error);
+    console.error('[ProfileCache] 保存profile快取失敗:', error);
   }
 }
 
@@ -328,11 +333,109 @@ async function getProfileCacheStats() {
   }
 }
 
+// ==================== 分頁關閉輔助函數 ====================
+
+/**
+ * 安全地關閉查詢分頁
+ * 如果使用者正在查看該分頁，會先切換回原本的 tab 再關閉
+ * @param {number} tabId - 要關閉的分頁 ID
+ * @param {number} originalTabId - 原本的 active tab ID（可選）
+ * @returns {Promise<boolean>} 是否成功關閉
+ */
+async function safeCloseTab(tabId, originalTabId = null) {
+  try {
+    // 檢查分頁是否還存在
+    let tabToClose;
+    try {
+      tabToClose = await chrome.tabs.get(tabId);
+    } catch (error) {
+      // 分頁已經不存在
+      console.log(`[QueryManager] 分頁 ${tabId} 已不存在，無需關閉`);
+      return true;
+    }
+
+    // 檢查該分頁是否為當前 active 分頁
+    if (tabToClose.active) {
+      console.log(`[QueryManager] 分頁 ${tabId} 是當前 active 分頁，需要先切換`);
+      
+      // 嘗試切換回原本的 tab
+      if (originalTabId) {
+        try {
+          await chrome.tabs.update(originalTabId, { active: true });
+          console.log(`[QueryManager] 已切換回原本的分頁 ${originalTabId}`);
+        } catch (error) {
+          console.log(`[QueryManager] 無法切換回原本分頁 ${originalTabId}:`, error.message);
+          // 原本的分頁可能已關閉，嘗試切換到同視窗的其他分頁
+          await switchToAnotherTab(tabToClose.windowId, tabId);
+        }
+      } else {
+        // 沒有原本的 tab ID，切換到同視窗的其他分頁
+        await switchToAnotherTab(tabToClose.windowId, tabId);
+      }
+      
+      // 等待一小段時間讓切換完成
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    // 關閉分頁
+    await chrome.tabs.remove(tabId);
+    console.log(`[QueryManager] 已關閉查詢分頁: ${tabId}`);
+
+    // 注意：不在這裡觸發 refreshRegionLabels，因為這會導致 DOM 元素被替換，
+    // 使得 content.js 中的查詢按鈕 click handler 的 closure 引用失效。
+    // 查詢結果會由 content.js 直接更新標籤。
+
+    return true;
+  } catch (error) {
+    console.error('[QueryManager] 關閉分頁時發生錯誤:', error);
+    return false;
+  }
+}
+
+/**
+ * 切換到同視窗的其他分頁
+ * @param {number} windowId - 視窗 ID
+ * @param {number} excludeTabId - 要排除的分頁 ID
+ */
+async function switchToAnotherTab(windowId, excludeTabId) {
+  try {
+    const tabs = await chrome.tabs.query({ windowId: windowId });
+    const otherTab = tabs.find(t => t.id !== excludeTabId);
+    if (otherTab) {
+      await chrome.tabs.update(otherTab.id, { active: true });
+      console.log(`[QueryManager] 已切換到其他分頁 ${otherTab.id}`);
+    }
+  } catch (error) {
+    console.error('[QueryManager] 切換到其他分頁時發生錯誤:', error);
+  }
+}
+
+/**
+ * 獲取當前 active 分頁的 ID
+ * @param {number} windowId - 視窗 ID（可選，如果不提供則使用當前視窗）
+ * @returns {Promise<number|null>} active 分頁的 ID
+ */
+async function getActiveTabId(windowId = null) {
+  try {
+    const queryOptions = { active: true };
+    if (windowId) {
+      queryOptions.windowId = windowId;
+    } else {
+      queryOptions.currentWindow = true;
+    }
+    const tabs = await chrome.tabs.query(queryOptions);
+    return tabs.length > 0 ? tabs[0].id : null;
+  } catch (error) {
+    console.error('[QueryManager] 獲取 active 分頁時發生錯誤:', error);
+    return null;
+  }
+}
+
 // ==================== 頁面捲動輔助函數 ====================
 
 /**
  * 執行隨機頁面捲動，模擬真實用戶行為
- * 在頁面載入後執行 3-5 次向下捲動，每次捲動距離和等待時間都有隨機變化
+ * 在頁面載入後執行 8-10 次向下捲動，每次捲動距離和等待時間都有隨機變化
  * @param {number} tabId - 要執行捲動的分頁 ID
  * @returns {Promise<void>}
  */
@@ -343,23 +446,20 @@ async function performRandomScrolls(tabId) {
     console.log(`[QueryManager] 頁面載入後等待 ${initialWait}ms`);
     await new Promise(resolve => setTimeout(resolve, initialWait));
 
-    // 隨機決定捲動次數 (3-5 次)
-    const scrollCount = Math.floor(Math.random() * 3) + 3;
+    // 隨機決定捲動次數 (1-2 次)
+    const scrollCount = Math.floor(Math.random() * 1) + 1;
     console.log(`[QueryManager] 開始執行 ${scrollCount} 次隨機捲動`);
 
     for (let i = 0; i < scrollCount; i++) {
-      // 每次捲動前等待隨機時間 (300-800ms)
-      const waitBeforeScroll = Math.floor(Math.random() * 500) + 300;
-      await new Promise(resolve => setTimeout(resolve, waitBeforeScroll));
-
       // 執行捲動
       await chrome.tabs.sendMessage(tabId, { action: 'performScroll' });
 
-      // 捲動後等待隨機時間 (400-900ms)
-      const waitAfterScroll = Math.floor(Math.random() * 500) + 400;
-      await new Promise(resolve => setTimeout(resolve, waitAfterScroll));
-
       console.log(`[QueryManager] 完成第 ${i + 1}/${scrollCount} 次捲動`);
+
+      // 捲動後等待隨機時間 (1000-2000ms)，釋放執行緒讓網頁處理頁面資料
+      const waitAfterScroll = Math.floor(Math.random() * 1000) + 1000;
+      console.log(`[QueryManager] 等待 ${waitAfterScroll}ms 讓頁面載入資料...`);
+      await new Promise(resolve => setTimeout(resolve, waitAfterScroll));
     }
 
     console.log(`[QueryManager] 隨機捲動完成`);
@@ -382,15 +482,19 @@ async function executeQuery(username, shouldKeepTab = false, keepTabFilter = '')
   const cleanUsername = username.startsWith('@') ? username.slice(1) : username;
 
   let newTab = null;
+  let originalTabId = null;
 
   try {
     console.log(`[QueryManager] 正在查詢 @${cleanUsername}...`);
+
+    // 記錄原本的 active tab ID，以便關閉查詢分頁時切換回去
+    originalTabId = await getActiveTabId();
 
     // 隨機延遲 2-5 秒，避免同時發起太多查詢，更像真實用戶行為
     const randomDelay = Math.random() * 2000 + 3000; // 1000-3000ms
     console.log(`[Threads] 等待 ${Math.round(randomDelay / 1000)} 秒後查詢下一個用戶`);
     await new Promise(resolve => setTimeout(resolve, randomDelay));
-    
+
     // 開啟新分頁到用戶的 Threads 個人資料頁面
     const profileUrl = `https://www.threads.com/@${cleanUsername}?hl=en`;
 
@@ -486,7 +590,7 @@ async function executeQuery(username, shouldKeepTab = false, keepTabFilter = '')
       // 如果 shouldKeepTab 為 true，且有過濾條件，則只有當結果不包含過濾條件時才保留
       let shouldCloseTab = !shouldKeepTab;
       
-      if (shouldKeepTab && keepTabFilter && keepTabFilter.trim() !== '') {
+      if (shouldKeepTab && keepTabFilter && keepTabFilter.trim() !== '' && region) {
         // 檢查結果是否包含過濾條件（不區分大小寫）
         const regionLower = region.toLowerCase();
         const filterLower = keepTabFilter.trim().toLowerCase();
@@ -502,18 +606,14 @@ async function executeQuery(username, shouldKeepTab = false, keepTabFilter = '')
         }
       }
       
-      if (shouldCloseTab && newTab) {
-        try {
-          await chrome.tabs.remove(newTab.id);
-          console.log(`[QueryManager] 已關閉查詢分頁: ${newTab.id}`);
-        } catch (closeError) {
-          console.error('[QueryManager] 關閉分頁時發生錯誤:', closeError);
-        }
-      }
       console.log(`[QueryManager] 查詢成功 @${cleanUsername}: ${region}`);
 
-      // 保存到快取
+      // 保存到快取（必須在關閉分頁之前，因為 safeCloseTab 會觸發 refreshRegionLabels）
       await saveCachedRegion(cleanUsername, region);
+
+      if (shouldCloseTab && newTab) {
+        await safeCloseTab(newTab.id, originalTabId);
+      }
 
       return {
         success: true,
@@ -521,6 +621,32 @@ async function executeQuery(username, shouldKeepTab = false, keepTabFilter = '')
         fromCache: false
       };
     } else {
+      // 檢查是否為 HTTP 429 錯誤
+      if (response && response.error === 'HTTP_429') {
+        console.error(`[QueryManager] HTTP 429 錯誤: ${response.errorMessage}`);
+        
+        // 關閉查詢分頁
+        if (newTab) {
+          await safeCloseTab(newTab.id, originalTabId);
+        }
+        
+        // 通知 sidepanel 顯示錯誤訊息並關閉自動查詢
+        try {
+          await chrome.runtime.sendMessage({
+            action: 'handle429Error',
+            errorMessage: response.errorMessage
+          });
+        } catch (error) {
+          console.error('[QueryManager] 無法通知 sidepanel 處理 429 錯誤:', error);
+        }
+        
+        return {
+          success: false,
+          error: 'HTTP_429',
+          errorMessage: response.errorMessage
+        };
+      }
+      
       // 查詢失敗，根據過濾條件決定是否關閉分頁
       // 失敗視為「結果不符合過濾條件」，如果有設定過濾條件則保留分頁
       let shouldCloseTab = !shouldKeepTab;
@@ -532,12 +658,7 @@ async function executeQuery(username, shouldKeepTab = false, keepTabFilter = '')
       }
       
       if (shouldCloseTab && newTab) {
-        try {
-          await chrome.tabs.remove(newTab.id);
-          console.log(`[QueryManager] 查詢失敗，已關閉分頁: ${newTab.id}`);
-        } catch (closeError) {
-          console.error('[QueryManager] 關閉分頁時發生錯誤:', closeError);
-        }
+        await safeCloseTab(newTab.id, originalTabId);
       }
       return {
         success: false,
@@ -545,7 +666,35 @@ async function executeQuery(username, shouldKeepTab = false, keepTabFilter = '')
       };
     }
   } catch (error) {
-    // 如果發生錯誤，根據過濾條件決定是否關閉分頁
+    // 檢查是否為 Content script 未能載入錯誤（可能是 HTTP 429）
+    const isContentScriptError = error.message && error.message.includes('Content script 未能載入');
+    
+    if (isContentScriptError) {
+      console.error(`[QueryManager] Content script 未能載入，可能是 HTTP 429 錯誤 @${cleanUsername}`);
+      
+      // 關閉查詢分頁
+      if (newTab) {
+        await safeCloseTab(newTab.id, originalTabId);
+      }
+      
+      // 通知 sidepanel 顯示錯誤訊息並關閉自動查詢
+      try {
+        await chrome.runtime.sendMessage({
+          action: 'handle429Error',
+          errorMessage: '已經超過查詢用量上限'
+        });
+      } catch (msgError) {
+        console.error('[QueryManager] 無法通知 sidepanel 處理 429 錯誤:', msgError);
+      }
+      
+      return {
+        success: false,
+        error: 'HTTP_429',
+        errorMessage: '已經超過查詢用量上限'
+      };
+    }
+    
+    // 其他錯誤，根據過濾條件決定是否關閉分頁
     let shouldCloseTab = !shouldKeepTab;
     
     if (shouldKeepTab && keepTabFilter && keepTabFilter.trim() !== '') {
@@ -555,11 +704,7 @@ async function executeQuery(username, shouldKeepTab = false, keepTabFilter = '')
     }
     
     if (shouldCloseTab && newTab) {
-      try {
-        await chrome.tabs.remove(newTab.id);
-      } catch (closeError) {
-        console.error('[QueryManager] 關閉分頁時發生錯誤:', closeError);
-      }
+      await safeCloseTab(newTab.id, originalTabId);
     }
 
     console.error(`[QueryManager] 查詢失敗 @${cleanUsername}:`, error.message);
@@ -586,9 +731,13 @@ async function executeIntegratedQuery(username, enableProfileAnalysis = false, s
   let queryTab = null;
   let userReplyContent = '';
   let userPostContent = '';
+  let originalTabId = null;
 
   try {
     console.log(`[QueryManager] 開始整合查詢 @${cleanUsername}，側寫分析: ${enableProfileAnalysis}`);
+
+    // 記錄原本的 active tab ID，以便關閉查詢分頁時切換回去
+    originalTabId = await getActiveTabId();
 
     // 隨機延遲 2-5 秒，避免同時發起太多查詢
     const randomDelay = Math.random() * 2000 + 3000;
@@ -637,7 +786,7 @@ async function executeIntegratedQuery(username, enableProfileAnalysis = false, s
           });
         }
       } else {
-        // 步驟 1: 前往回覆頁面取得內容
+        // 步驟 1: 前往回覆頁面取得內容（背景分頁，只能抓第一頁）
         console.log(`[QueryManager] 步驟 1: 前往 @${cleanUsername} 的回覆頁面`);
         const replyUrl = `https://www.threads.com/@${cleanUsername}/replies?hl=zh-tw`;
         queryTab = await chrome.tabs.create({ ...createOptions, url: replyUrl });
@@ -746,6 +895,7 @@ async function executeIntegratedQuery(username, enableProfileAnalysis = false, s
             });
           }
         }
+
       }
     }
 
@@ -811,7 +961,7 @@ async function executeIntegratedQuery(username, enableProfileAnalysis = false, s
       // 根據設定決定是否關閉分頁
       let shouldCloseTab = !shouldKeepTab;
       
-      if (shouldKeepTab && keepTabFilter && keepTabFilter.trim() !== '') {
+      if (shouldKeepTab && keepTabFilter && keepTabFilter.trim() !== '' && region) {
         const regionLower = region.toLowerCase();
         const filterLower = keepTabFilter.trim().toLowerCase();
         
@@ -824,19 +974,14 @@ async function executeIntegratedQuery(username, enableProfileAnalysis = false, s
         }
       }
 
-      if (shouldCloseTab && queryTab) {
-        try {
-          await chrome.tabs.remove(queryTab.id);
-          console.log(`[QueryManager] 已關閉查詢分頁: ${queryTab.id}`);
-        } catch (closeError) {
-          console.error('[QueryManager] 關閉分頁時發生錯誤:', closeError);
-        }
-      }
-
       console.log(`[QueryManager] 查詢成功 @${cleanUsername}: ${region}`);
 
-      // 保存到快取
+      // 保存到快取（必須在關閉分頁之前，因為 safeCloseTab 會觸發 refreshRegionLabels）
       await saveCachedRegion(cleanUsername, region);
+
+      if (shouldCloseTab && queryTab) {
+        await safeCloseTab(queryTab.id, originalTabId);
+      }
 
       return {
         success: true,
@@ -844,6 +989,32 @@ async function executeIntegratedQuery(username, enableProfileAnalysis = false, s
         fromCache: false
       };
     } else {
+      // 檢查是否為 HTTP 429 錯誤
+      if (response && response.error === 'HTTP_429') {
+        console.error(`[QueryManager] HTTP 429 錯誤: ${response.errorMessage}`);
+        
+        // 關閉查詢分頁
+        if (queryTab) {
+          await safeCloseTab(queryTab.id, originalTabId);
+        }
+        
+        // 通知 sidepanel 顯示錯誤訊息並關閉自動查詢
+        try {
+          await chrome.runtime.sendMessage({
+            action: 'handle429Error',
+            errorMessage: response.errorMessage
+          });
+        } catch (error) {
+          console.error('[QueryManager] 無法通知 sidepanel 處理 429 錯誤:', error);
+        }
+        
+        return {
+          success: false,
+          error: 'HTTP_429',
+          errorMessage: response.errorMessage
+        };
+      }
+      
       // 查詢失敗
       let shouldCloseTab = !shouldKeepTab;
       
@@ -853,11 +1024,7 @@ async function executeIntegratedQuery(username, enableProfileAnalysis = false, s
       }
 
       if (shouldCloseTab && queryTab) {
-        try {
-          await chrome.tabs.remove(queryTab.id);
-        } catch (closeError) {
-          console.error('[QueryManager] 關閉分頁時發生錯誤:', closeError);
-        }
+        await safeCloseTab(queryTab.id, originalTabId);
       }
 
       return {
@@ -867,7 +1034,35 @@ async function executeIntegratedQuery(username, enableProfileAnalysis = false, s
     }
 
   } catch (error) {
-    // 清理分頁
+    // 檢查是否為 Content script 未能載入錯誤（可能是 HTTP 429）
+    const isContentScriptError = error.message && error.message.includes('Content script 未能載入');
+    
+    if (isContentScriptError) {
+      console.error(`[QueryManager] Content script 未能載入，可能是 HTTP 429 錯誤 @${cleanUsername}`);
+      
+      // 關閉查詢分頁
+      if (queryTab) {
+        await safeCloseTab(queryTab.id, originalTabId);
+      }
+      
+      // 通知 sidepanel 顯示錯誤訊息並關閉自動查詢
+      try {
+        await chrome.runtime.sendMessage({
+          action: 'handle429Error',
+          errorMessage: '已經超過查詢用量上限'
+        });
+      } catch (msgError) {
+        console.error('[QueryManager] 無法通知 sidepanel 處理 429 錯誤:', msgError);
+      }
+      
+      return {
+        success: false,
+        error: 'HTTP_429',
+        errorMessage: '已經超過查詢用量上限'
+      };
+    }
+    
+    // 其他錯誤，清理分頁
     let shouldCloseTab = !shouldKeepTab;
     
     if (shouldKeepTab && keepTabFilter && keepTabFilter.trim() !== '') {
@@ -875,11 +1070,7 @@ async function executeIntegratedQuery(username, enableProfileAnalysis = false, s
     }
 
     if (shouldCloseTab && queryTab) {
-      try {
-        await chrome.tabs.remove(queryTab.id);
-      } catch (closeError) {
-        console.error('[QueryManager] 關閉分頁時發生錯誤:', closeError);
-      }
+      await safeCloseTab(queryTab.id, originalTabId);
     }
 
     console.error(`[QueryManager] 整合查詢失敗 @${cleanUsername}:`, error.message);
@@ -905,8 +1096,9 @@ async function processQueryQueue() {
   // 從隊列中取出一個任務
   const task = queryQueue.shift();
   activeQueryCount++;
+  activeQueries.add(task.username); // 記錄正在執行的用戶
 
-  console.log(`[QueryManager] 開始處理任務 @${task.username} (進行中: ${activeQueryCount}/${queueJobMax}, 隊列剩餘: ${queryQueue.length})`);
+  console.log(`[QueryManager] 開始處理任務 @${task.username} (同時開啟 tab 數: ${activeQueryCount}/${queueJobMax}, Queue 剩餘: ${queryQueue.length})`);
 
   try {
     let result;
@@ -928,10 +1120,17 @@ async function processQueryQueue() {
     task.reject(error);
   } finally {
     activeQueryCount--;
+    activeQueries.delete(task.username); // 移除已完成的用戶
     console.log(`[QueryManager] 任務完成 @${task.username} (進行中: ${activeQueryCount}/${queueJobMax}, 隊列剩餘: ${queryQueue.length})`);
 
-    // 任務完成後，繼續處理隊列中的下一個任務
-    processQueryQueue();
+    // 任務完成後，等待隨機延遲再處理下一個任務（避免查詢過於頻繁）
+    if (queryQueue.length > 0) {
+      const delay = Math.floor(Math.random() * (QUERY_DELAY_MAX - QUERY_DELAY_MIN + 1)) + QUERY_DELAY_MIN;
+      console.log(`[QueryManager] 等待 ${delay}ms 後處理下一個任務`);
+      setTimeout(() => {
+        processQueryQueue();
+      }, delay);
+    }
   }
 }
 
@@ -940,13 +1139,23 @@ async function processQueryQueue() {
  * @param {string} username - 用戶帳號
  * @param {boolean} shouldKeepTab - 是否保留查詢分頁
  * @param {string} keepTabFilter - 保留分頁的過濾條件
+ * @param {boolean} isPriority - 是否為優先任務（手動查詢或重新查詢）
  * @returns {Promise<{success: boolean, region?: string, error?: string}>|null} 返回 null 表示無法加入隊列
  */
-function addToQueryQueue(username, shouldKeepTab = false, keepTabFilter = '') {
+function addToQueryQueue(username, shouldKeepTab = false, keepTabFilter = '', isPriority = false) {
   // 檢查隊列是否已滿
   if (queryQueue.length >= queryQueueMax) {
-    console.log(`[QueryManager] 隊列已滿 (${queryQueue.length}/${queryQueueMax})，拒絕加入 @${username}`);
-    return null;
+    if (isPriority) {
+      // 優先任務：移除隊列最後一個任務，插隊到下一個執行位置
+      const removedTask = queryQueue.pop();
+      console.log(`[QueryManager] 隊列已滿，優先任務 @${username} 插隊，移除最後任務 @${removedTask.username}`);
+      
+      // 通知被移除的任務失敗
+      removedTask.reject(new Error('隊列已滿，被優先任務替換'));
+    } else {
+      console.log(`[QueryManager] 隊列已滿 (${queryQueue.length}/${queryQueueMax})，拒絕加入 @${username}`);
+      return null;
+    }
   }
 
   // 檢查是否已在隊列中（避免重複）
@@ -956,17 +1165,31 @@ function addToQueryQueue(username, shouldKeepTab = false, keepTabFilter = '') {
     return null;
   }
 
+  // 檢查是否正在執行中（避免重複）
+  if (activeQueries.has(username)) {
+    console.log(`[QueryManager] @${username} 正在查詢中，跳過重複加入`);
+    return null;
+  }
+
   return new Promise((resolve, reject) => {
-    queryQueue.push({
+    const task = {
       username,
       isIntegrated: false,
       shouldKeepTab,
       keepTabFilter,
       resolve,
       reject
-    });
+    };
 
-    console.log(`[QueryManager] 任務已加入隊列 @${username} (隊列長度: ${queryQueue.length}/${queryQueueMax})`);
+    if (isPriority) {
+      // 優先任務插入到隊列開頭（下一個執行位置）
+      queryQueue.unshift(task);
+      console.log(`[QueryManager] 優先任務已插隊到隊列開頭 @${username} (隊列長度: ${queryQueue.length}/${queryQueueMax})`);
+    } else {
+      // 一般任務加入到隊列末尾
+      queryQueue.push(task);
+      console.log(`[QueryManager] 任務已加入隊列 @${username} (隊列長度: ${queryQueue.length}/${queryQueueMax})`);
+    }
 
     // 嘗試立即開始處理隊列
     processQueryQueue();
@@ -980,13 +1203,23 @@ function addToQueryQueue(username, shouldKeepTab = false, keepTabFilter = '') {
  * @param {boolean} shouldKeepTab - 是否保留查詢分頁
  * @param {string} keepTabFilter - 保留分頁的過濾條件
  * @param {function} onProfileContentReady - 當側寫內容準備好時的回調
+ * @param {boolean} isPriority - 是否為優先任務（手動查詢或重新查詢）
  * @returns {Promise<{success: boolean, region?: string, error?: string}>|null} 返回 null 表示無法加入隊列
  */
-function addToIntegratedQueryQueue(username, enableProfileAnalysis = false, shouldKeepTab = false, keepTabFilter = '', onProfileContentReady = null) {
+function addToIntegratedQueryQueue(username, enableProfileAnalysis = false, shouldKeepTab = false, keepTabFilter = '', onProfileContentReady = null, isPriority = false) {
   // 檢查隊列是否已滿
   if (queryQueue.length >= queryQueueMax) {
-    console.log(`[QueryManager] 隊列已滿 (${queryQueue.length}/${queryQueueMax})，拒絕加入 @${username}`);
-    return null;
+    if (isPriority) {
+      // 優先任務：移除隊列最後一個任務，插隊到下一個執行位置
+      const removedTask = queryQueue.pop();
+      console.log(`[QueryManager] 隊列已滿，優先任務 @${username} 插隊，移除最後任務 @${removedTask.username}`);
+      
+      // 通知被移除的任務失敗
+      removedTask.reject(new Error('隊列已滿，被優先任務替換'));
+    } else {
+      console.log(`[QueryManager] 隊列已滿 (${queryQueue.length}/${queryQueueMax})，拒絕加入 @${username}`);
+      return null;
+    }
   }
 
   // 檢查是否已在隊列中（避免重複）
@@ -996,8 +1229,14 @@ function addToIntegratedQueryQueue(username, enableProfileAnalysis = false, shou
     return null;
   }
 
+  // 檢查是否正在執行中（避免重複）
+  if (activeQueries.has(username)) {
+    console.log(`[QueryManager] @${username} 正在查詢中，跳過重複加入`);
+    return null;
+  }
+
   return new Promise((resolve, reject) => {
-    queryQueue.push({
+    const task = {
       username,
       isIntegrated: true,
       enableProfileAnalysis,
@@ -1006,9 +1245,17 @@ function addToIntegratedQueryQueue(username, enableProfileAnalysis = false, shou
       onProfileContentReady,
       resolve,
       reject
-    });
+    };
 
-    console.log(`[QueryManager] 整合查詢任務已加入隊列 @${username} (隊列長度: ${queryQueue.length}/${queryQueueMax})`);
+    if (isPriority) {
+      // 優先任務插入到隊列開頭（下一個執行位置）
+      queryQueue.unshift(task);
+      console.log(`[QueryManager] 手動查詢任務已插隊到隊列開頭 @${username} (Queue 剩餘: ${queryQueue.length}/${queryQueueMax})`);
+    } else {
+      // 一般任務加入到隊列末尾
+      queryQueue.push(task);
+      console.log(`[QueryManager] 自動查詢任務已加入隊尾 @${username} (Queue 剩餘: ${queryQueue.length}/${queryQueueMax})`);
+    }
 
     // 嘗試立即開始處理隊列
     processQueryQueue();
@@ -1022,9 +1269,10 @@ function addToIntegratedQueryQueue(username, enableProfileAnalysis = false, shou
  * @param {string} username - 用戶帳號
  * @param {boolean} shouldKeepTab - 是否保留查詢分頁（可選，默認從 storage 讀取）
  * @param {boolean} forceRefresh - 是否強制重新查詢（忽略快取，可選，默認 false）
+ * @param {boolean} isPriority - 是否為優先任務（手動查詢或重新查詢，可選，默認 false）
  * @returns {Promise<{success: boolean, region?: string, error?: string, fromCache?: boolean}>}
  */
-async function queryUserRegion(username, shouldKeepTab = null, forceRefresh = false) {
+async function queryUserRegion(username, shouldKeepTab = null, forceRefresh = false, isPriority = false) {
   // 移除 @ 符號（如果有的話）
   const cleanUsername = username.startsWith('@') ? username.slice(1) : username;
 
@@ -1067,8 +1315,10 @@ async function queryUserRegion(username, shouldKeepTab = null, forceRefresh = fa
   }
 
   // 沒有快取或強制刷新，加入隊列執行查詢
-  console.log(`[QueryManager] 查詢參數: shouldKeepTab=${shouldKeepTab}, keepTabFilter="${keepTabFilter}"`);
-  const queueResult = addToQueryQueue(cleanUsername, shouldKeepTab, keepTabFilter);
+  // 強制刷新視為優先任務
+  const finalIsPriority = isPriority || forceRefresh;
+  console.log(`[QueryManager] 查詢參數: shouldKeepTab=${shouldKeepTab}, keepTabFilter="${keepTabFilter}", isPriority=${finalIsPriority}`);
+  const queueResult = addToQueryQueue(cleanUsername, shouldKeepTab, keepTabFilter, finalIsPriority);
   
   // 如果無法加入隊列（隊列已滿或已存在），返回失敗
   if (queueResult === null) {

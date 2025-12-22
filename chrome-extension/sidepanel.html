@@ -8,12 +8,19 @@
 </head>
 <body>
   <div class="container">
-    <h1>小黃標-Threads 用戶資訊標籤 v0.9.4</h1>
+    <h1>小黃標-Threads 用戶資訊標籤 v0.9.7</h1>
 
     <div class="welcome-section">
       <ol class="instructions">
       	<li>開啟此工具面板後，會自動在每位用戶名稱旁加入<span class="location-tag">用戶資訊標籤</span>。點擊[查詢]會自動開啟新分頁做分析。</li>
-	<li>若不需要此功能，只要關閉側邊欄，即可同時移除頁面上所有標籤。</li>      </ol>
+        <li>若不需要此功能，只要關閉側邊欄，即可同時移除頁面上所有標籤。</li> 
+      <li>
+        進階功能中提供「社群行為分析（實驗性功能）」選項。
+        啟用後，系統會分析用戶近期的貼文與回覆內容，
+        在頁面上顯示行為重點標註，幫助快速了解互動風格。
+        此功能預設為關閉，需手動開啟。
+      </li>
+    </ol>
     </div>
 
     <div id="statusBar" class="status-bar">就緒</div>
@@ -23,39 +30,13 @@
       <div class="advanced-content">
         <div class="control-group">
           <label class="checkbox-container">
-            <input type="checkbox" id="keepTabCheckbox">
-            <span class="checkbox-label">查詢後保留結果分頁</span>
-          </label>
-          <p class="option-description">此選項開啟時，會保留所開啟的查詢結果分頁，可供查看查詢結果，以及該用戶其他資訊。</p>
-          <div class="sub-option" id="keepTabFilterContainer" style="display: none;">
-            <label for="keepTabFilterInput">僅保留結果不符合：</label>
-            <input type="text" id="keepTabFilterInput" value="Taiwan" style="width: 120px;">
-          </div>
-        </div>
-
-        <div class="control-group">
-          <label class="checkbox-container">
-            <input type="checkbox" id="autoQueryVisibleCheckbox">
-            <span class="checkbox-label">自動查詢</span>
-          </label>
-          <p class="option-description">此選項開啟時，不用手動點擊，程式會自動開啟分頁進行查詢。
-            會控制每次最多開啟分頁數量，請自行視網路與電腦速度，控制檢視與查詢的速度。
-          </p>
-          <div class="sub-option">
-            <label for="maxConcurrentInput">同時最多查詢分頁數量：</label>
-            <input type="number" id="maxConcurrentInput" min="1" max="10" value="3" style="width: 60px;">
-          </div>
-        </div>
-
-        <div class="control-group">
-          <label class="checkbox-container">
             <input type="checkbox" id="llmProfileAnalysisCheckbox">
-            <span class="checkbox-label">社群行為分析</span>
+            <span class="checkbox-label">社群行為分析(實驗性功能)</span>
           </label>
-          <p class="option-description">根據用戶近期的貼文與回覆內容，AI自動產生使用者標籤。</p>
+          <p class="option-description">根據用戶近期的貼文與回覆內容，使用AI產生行為側寫標籤。</p>
           <div class="llm-provider-section" id="llmProviderSection" style="display: none;">
             <div class="llm-provider-options">
-              <label for="llmProviderSelect">選擇模型：</label>
+              <label for="llmProviderSelect">模型：</label>
               <select id="llmProviderSelect" name="llmProvider">
                 <option value="openai">gpt-5-mini (遠端API)</option>
                 <option value="local">gemini-3-nano (本機)</option>
@@ -80,6 +61,33 @@
             </div>
           </div>
         </div>
+
+        <div class="control-group">
+          <label class="checkbox-container">
+            <input type="checkbox" id="autoQueryVisibleCheckbox">
+            <span class="checkbox-label">自動查詢</span>
+          </label>
+          <p class="option-description">此選項開啟時，不用手動點擊，程式會自動開啟分頁進行查詢。
+            會控制每次最多開啟分頁數量，請自行視網路與電腦速度，控制檢視與查詢的速度。
+          </p>
+          <div class="sub-option" id="maxConcurrentContainer" style="display: none;">
+            <label for="maxConcurrentInput">同時最多查詢分頁數量：</label>
+            <input type="number" id="maxConcurrentInput" min="1" max="10" value="3" style="width: 60px;">
+          </div>
+        </div>
+        
+
+        <div class="control-group">
+          <label class="checkbox-container">
+            <input type="checkbox" id="keepTabCheckbox">
+            <span class="checkbox-label">查詢後保留結果分頁</span>
+          </label>
+          <p class="option-description">此選項開啟時，會保留所開啟的查詢結果分頁，可供查看查詢結果，以及該用戶其他資訊。</p>
+          <div class="sub-option" id="keepTabFilterContainer" style="display: none;">
+            <label for="keepTabFilterInput">僅保留結果不符合：</label>
+            <input type="text" id="keepTabFilterInput" value="Taiwan" style="width: 120px;">
+          </div>
+        </div>
         
         <!--
         <div class="user-count-display">
@@ -99,6 +107,12 @@
           <span id="profileCacheStatsLabel">已儲存用戶側寫: <strong id="profileCacheCount" class="cache-count-clickable" title="點擊刷新統計">0</strong></span>
           <button id="showProfileCacheBtn" class="show-cache-btn" title="顯示所有本機保存的用戶側寫資料">顯示</button>
           <button id="clearProfileCacheBtn" class="clear-cache-btn" title="清除所有本機保存的用戶側寫資料">清除</button>
+        </div>
+
+        <div class="cache-stats-display">
+          <span id="trustListStatsLabel">已儲存手動信任清單: <strong id="trustListCount" class="cache-count-clickable" title="點擊刷新統計">0</strong></span>
+          <button id="showTrustListBtn" class="show-cache-btn" title="顯示所有手動信任的用戶">顯示</button>
+          <button id="clearTrustListBtn" class="clear-cache-btn" title="清除所有手動信任的用戶">清除</button>
         </div>
 
         <div class="content-group">
