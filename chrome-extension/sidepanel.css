@@ -11,6 +11,7 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 
 .container {
@@ -21,7 +22,6 @@ body {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
 }
 
 h1 {
@@ -202,9 +202,7 @@ label {
   margin-top: 8px;
   display: flex;
   flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
+  min-height: 120px;
 }
 
 .content-group label {
@@ -218,11 +216,11 @@ label {
   border-radius: 3px;
   font-size: 10px;
   font-family: 'Courier New', Courier, monospace;
-  resize: none;
+  resize: vertical;
   background-color: #fafafa;
   line-height: 1.4;
-  flex: 1;
-  min-height: 0;
+  min-height: 100px;
+  height: 100px;
   overflow-y: auto;
 }
 
@@ -385,13 +383,6 @@ label {
   flex-shrink: 0;
 }
 
-.advanced-section[open] {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
 .advanced-toggle {
   padding: 10px 14px;
   font-size: 13px;
@@ -428,12 +419,8 @@ label {
 .advanced-content {
   padding: 12px 14px 14px;
   border-top: 1px solid #e2e8f0;
-  min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  max-height: 550px;
-  overflow-y: auto;
 }
 
 /* 子選項區域 */

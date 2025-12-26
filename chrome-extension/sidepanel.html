@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>小黃標-Threads 用戶所在地自動標籤</title>
+  <title>小黃標- Threads用戶所在地自動標籤</title>
   <link rel="stylesheet" href="sidepanel.css">
 </head>
 <body>
   <div class="container">
-    <h1>小黃標-Threads 用戶資訊標籤 v0.9.7</h1>
+    <h1>小黃標- Threads用戶資訊標籤 v0.9.8</h1>
 
     <div class="welcome-section">
       <ol class="instructions">
@@ -16,7 +16,7 @@
         <li>若不需要此功能，只要關閉側邊欄，即可同時移除頁面上所有標籤。</li> 
       <li>
         進階功能中提供「社群行為分析（實驗性功能）」選項。
-        啟用後，系統會分析用戶近期的貼文與回覆內容，
+        啟用後，系統會用AI分析用戶近期的貼文與回覆內容，
         在頁面上顯示行為重點標註，幫助快速了解互動風格。
         此功能預設為關閉，需手動開啟。
       </li>
@@ -29,6 +29,24 @@
       <summary class="advanced-toggle">進階功能...</summary>
       <div class="advanced-content">
         <div class="control-group">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+            <label for="autoQueryModeSelect" style="margin: 0; font-weight: 500;">自動查詢：</label>
+            <select id="autoQueryModeSelect" name="autoQueryMode" style="flex: 1; max-width: 250px;">
+              <option value="off">關閉</option>
+              <option value="smart">智慧自動查詢</option>
+              <option value="visible">顯示時自動查詢</option>
+            </select>
+          </div>
+          <p class="option-description" id="autoQueryModeDescription">僅作手動查詢</p>
+          <div class="sub-option" id="maxConcurrentContainer" style="display: none;">
+            <label for="maxConcurrentInput">同時最多查詢分頁數量：</label>
+            <input type="number" id="maxConcurrentInput" min="1" max="10" value="3" style="width: 60px;">
+          </div>
+        </div>
+
+        <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+
+        <div class="control-group">
           <label class="checkbox-container">
             <input type="checkbox" id="llmProfileAnalysisCheckbox">
             <span class="checkbox-label">社群行為分析(實驗性功能)</span>
@@ -39,12 +57,13 @@
               <label for="llmProviderSelect">模型：</label>
               <select id="llmProviderSelect" name="llmProvider">
                 <option value="openai">gpt-5-mini (遠端API)</option>
+                <option value="claude">claude-haiku-4.5 (遠端API)</option>
                 <option value="local">gemini-3-nano (本機)</option>
               </select>
             </div>
             <div class="llm-config-panel" id="openaiConfigPanel">
               <div class="config-row">
-                <label for="openaiApiKeyInput">API Key：</label>
+                <label for="openaiApiKeyInput">OpenAI API Key：</label>
                 <span id="apiKeySetIndicator" style="display: none;">
                   <span class="api-key-set-text">已設定</span>
                   <button type="button" id="editApiKeyBtn" class="small-text-btn">[edit]</button>
@@ -56,23 +75,23 @@
                 <span id="apiKeyStatus" class="api-key-status"></span>
               </div>
             </div>
+            <div class="llm-config-panel" id="claudeConfigPanel" style="display: none;">
+              <div class="config-row">
+                <label for="claudeApiKeyInput">Claude API Key：</label>
+                <span id="claudeApiKeySetIndicator" style="display: none;">
+                  <span class="api-key-set-text">已設定</span>
+                  <button type="button" id="editClaudeApiKeyBtn" class="small-text-btn">[edit]</button>
+                </span>
+                <span id="claudeApiKeyInputContainer">
+                  <input type="password" id="claudeApiKeyInput" placeholder="sk-ant-..." style="width: 160px;">
+                  <button type="button" id="clearClaudeApiKeyBtn" class="small-text-btn">[clear]</button>
+                </span>
+                <span id="claudeApiKeyStatus" class="api-key-status"></span>
+              </div>
+            </div>
             <div class="llm-config-panel" id="localLLMConfigPanel" style="display: none;">
               <div id="localLLMStatus" class="local-llm-status checking">檢查中...</div>
             </div>
-          </div>
-        </div>
-
-        <div class="control-group">
-          <label class="checkbox-container">
-            <input type="checkbox" id="autoQueryVisibleCheckbox">
-            <span class="checkbox-label">自動查詢</span>
-          </label>
-          <p class="option-description">此選項開啟時，不用手動點擊，程式會自動開啟分頁進行查詢。
-            會控制每次最多開啟分頁數量，請自行視網路與電腦速度，控制檢視與查詢的速度。
-          </p>
-          <div class="sub-option" id="maxConcurrentContainer" style="display: none;">
-            <label for="maxConcurrentInput">同時最多查詢分頁數量：</label>
-            <input type="number" id="maxConcurrentInput" min="1" max="10" value="3" style="width: 60px;">
           </div>
         </div>
         

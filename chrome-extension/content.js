@@ -62,6 +62,7 @@ const REGIONS_DATA = [
   { "en": "Afghanistan", "zh_tw": "阿富汗", "emoji": "🇦🇫" },
   { "en": "Uzbekistan", "zh_tw": "烏茲別克", "emoji": "🇺🇿" },
   { "en": "Cambodia", "zh_tw": "柬埔寨", "emoji": "🇰🇭" },
+  { "en": "Laos", "zh_tw": "寮國", "emoji": "🇱🇦" },
   { "en": "Saudi Arabia", "zh_tw": "沙烏地阿拉伯", "emoji": "🇸🇦" },
   // 北美
   { "en": "United States", "zh_tw": "美國", "emoji": "🇺🇸" },
@@ -85,6 +86,7 @@ const REGIONS_DATA = [
   { "en": "Nigeria", "zh_tw": "奈及利亞", "emoji": "🇳🇬" },
   // 南美
   { "en": "Colombia", "zh_tw": "哥倫比亞", "emoji": "🇨🇴" },
+  { "en": "Chile", "zh_tw": "智利", "emoji": "🇨🇱" },
   // 大洋洲
   { "en": "Australia", "zh_tw": "澳洲", "emoji": "🇦🇺" },
   { "en": "New Zealand", "zh_tw": "紐西蘭", "emoji": "🇳🇿" },
@@ -93,6 +95,31 @@ const REGIONS_DATA = [
   { "en": "Mexico", "zh_tw": "墨西哥", "emoji": "🇲🇽" },
   { "en": "Russia", "zh_tw": "俄羅斯", "emoji": "🇷🇺" }
 ];
+
+/**
+ * 檢測頁面是否處於深色模式
+ * @returns {boolean} true 表示深色模式，false 表示淺色模式
+ */
+function isPageInDarkMode() {
+  const htmlElement = document.documentElement;
+  return htmlElement.classList.contains('__fb-dark-mode');
+}
+
+/**
+ * 根據深色/淺色模式返回灰色標籤的背景顏色
+ * @returns {string} 顏色代碼
+ */
+function getGrayLabelBgColor() {
+  return isPageInDarkMode() ? GRAY_LABEL_BG_COLOR_IN_DARK_MODE : GRAY_LABEL_BG_COLOR;
+}
+
+/**
+ * 根據深色/淺色模式返回灰色文字顏色
+ * @returns {string} 顏色代碼
+ */
+function getGrayTextColor() {
+  return isPageInDarkMode() ? GRAY_TEXT_COLOR_DARK_MODE : GRAY_TEXT_COLOR;
+}
 
 // 监听来自 sidepanel 的消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -248,6 +275,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         // 步驟 1: 找到並點擊 "About this profile" 按鈕
         const region = await autoClickAboutProfileAndGetRegion();
+
+        // 檢查是否為 ME_UI_ISSUE 錯誤（自己的帳號）
+        if (region && typeof region === 'object' && region.error === 'ME_UI_ISSUE') {
+          console.log(`[Threads] 偵測到 ME_UI_ISSUE 錯誤（這是自己的帳號）`);
+          sendResponse({
+            success: false,
+            error: 'ME_UI_ISSUE',
+            errorMessage: '這是自己的帳號'
+          });
+          return;
+        }
+
+        // 檢查是否為速率限制錯誤
+        if (region && typeof region === 'object' && region.error === 'RATE_LIMIT') {
+          console.log(`[Threads] 偵測到速率限制錯誤（找不到 About this profile 按鈕）`);
+          sendResponse({
+            success: false,
+            error: 'HTTP_429',
+            errorMessage: '已經超過查詢用量上限'
+          });
+          return;
+        }
 
         if (region) {
           console.log(`[Threads] 成功取得地區: ${region}`);
@@ -564,6 +613,42 @@ function findRegionOnProfilePage() {
 }
 
 /**
+ * 解析互動數字（支援 K、M 等單位）
+ * @param {string} text - 數字文字，如 "7.6K", "40.3K", "1.2M"
+ * @returns {number} 解析後的數字
+ */
+function parseEngagementCount(text) {
+  if (!text) return 0;
+  
+  text = text.trim().toUpperCase();
+  
+  // 移除逗號
+  text = text.replace(/,/g, '');
+  
+  // 解析 K (千)
+  if (text.endsWith('K')) {
+    const num = parseFloat(text.slice(0, -1));
+    return Math.round(num * 1000);
+  }
+  
+  // 解析 M (百萬)
+  if (text.endsWith('M')) {
+    const num = parseFloat(text.slice(0, -1));
+    return Math.round(num * 1000000);
+  }
+  
+  // 解析 B (十億)
+  if (text.endsWith('B')) {
+    const num = parseFloat(text.slice(0, -1));
+    return Math.round(num * 1000000000);
+  }
+  
+  // 直接解析數字
+  const num = parseFloat(text);
+  return isNaN(num) ? 0 : Math.round(num);
+}
+
+/**
  * 從文字中提取國家/區域資訊
  * @param {string} text - 要分析的文字
  * @returns {string|null} 國家/區域名稱
@@ -605,7 +690,7 @@ function flagEmojiToCountry(flag) {
 
 /**
  * 自動點擊 "About this profile" 並取得地區資訊
- * @returns {Promise<string|null>} 地區名稱
+ * @returns {Promise<string|null|{error: string}>} 地區名稱或錯誤物件
  */
 async function autoClickAboutProfileAndGetRegion() {
   try {
@@ -653,7 +738,16 @@ async function autoClickAboutProfileAndGetRegion() {
 
     if (!aboutSpan) {
       console.log('[Threads] 找不到 "About this profile" 文字');
-      return null;
+      
+      // 檢查是否有 "Insights" 按鈕（表示是自己的帳號）
+      const insightsSpan = findSpanWithText('Insights');
+      if (insightsSpan) {
+        console.log('[Threads] 找到 "Insights" 按鈕，判定為自己的帳號');
+        return { error: 'ME_UI_ISSUE' };
+      }
+      
+      // 如果沒有 Insights，則維持原本的 RATE_LIMIT 錯誤
+      return { error: 'RATE_LIMIT' };
     }
 
     console.log('[Threads] 找到 "About this profile" span:', aboutSpan);
@@ -663,7 +757,7 @@ async function autoClickAboutProfileAndGetRegion() {
 
     if (!aboutButton) {
       console.log('[Threads] 找不到 About this profile 的按鈕');
-      return null;
+      return { error: 'RATE_LIMIT' };
     }
 
     console.log('[Threads] 找到 "About this profile" 按鈕:', aboutButton);
@@ -893,11 +987,13 @@ function waitForMilliseconds(ms) {
 const RED_FLAG_LOCATION = 'China';
 const RED_FLAG_PROFILE_TAGS = [ '仇恨言論','統戰言論'];
 const GRAY_FLAG_PROFILE_TAGS = [ '易怒','謾罵','人身攻擊','詐騙風險','統戰言論','仇恨言論','刻意引戰','攻擊發言','惡意嘲諷'];
-const GRAY_FLAG_LOCATION = ['China',  'India','Bangladesh','Afghanistan','Uzbekistan','Tunisia','Kenya','Brazil','Bulgaria','Saudi Arabia','Libya','Nigeria','Czech Republic','Colombia','Cambodia','Russia','Pakistan']; // 灰色標籤的地點
+const GRAY_FLAG_LOCATION = ['China',  'India','Bangladesh','Afghanistan','Uzbekistan','Tunisia','Kenya','Brazil','Bulgaria','Saudi Arabia','Libya','Nigeria','Czech Republic','Colombia','Cambodia','Russia','Pakistan','Laos','Chile']; // 灰色標籤的地點
 const GREEN_FLAG_LOCATION = 'Taiwan';
 const NOT_USE_RED_FLAG = true; // 由於本機模型能力有限，暫時不使用紅色標籤
 const GRAY_LABEL_BG_COLOR = '#9e9e9e'; // 灰色標籤的背景顏色
 const GRAY_TEXT_COLOR = '#cccccce6'; // 灰色標籤對應的貼文文字顏色
+const GRAY_LABEL_BG_COLOR_IN_DARK_MODE = '#616161'; // 深色模式下灰色標籤的背景顏色
+const GRAY_TEXT_COLOR_DARK_MODE = '#333333'; // 灰色標籤對應的貼文文字顏色
 const MANUAL_TRUST_LIST_KEY = 'manualTrustList'; // localStorage 中手動信任清單的鍵名
 
 // ==================== 手動信任清單管理 ====================
@@ -978,9 +1074,10 @@ function isInManualTrustList(account) {
  * @param {string} region - 地區名稱
  * @param {string} profile - 側寫標籤（逗號分隔）
  * @param {string} account - 帳號名稱（用於檢查手動信任清單）
+ * @param {string} regionQueryStatus - 查詢狀態（可選）
  * @returns {Object} 包含 backgroundColor 和 textColor 的物件
  */
-function getRegionColor(region, profile = null, account = null) {
+function getRegionColor(region, profile = null, account = null, regionQueryStatus = null) {
   // 0. 優先檢查手動信任清單：如果在清單中，一律顯示為綠色
   if (account && isInManualTrustList(account)) {
     return {
@@ -988,8 +1085,25 @@ function getRegionColor(region, profile = null, account = null) {
       textColor: 'white'
     };
   }
-  // 1. 尚未查詢/查詢中：黃色（但如果已有側寫則視為已完成，使用灰色）
+  
+  // 1. 處理 region 為 null 的情況，根據 regionQueryStatus 決定顏色
   if (!region && !profile) {
+    // 1.1 未查詢或查詢中或查詢失敗：黃色
+    if (!regionQueryStatus || regionQueryStatus === 'in_progress' || 
+        regionQueryStatus === 'fail_http429' || regionQueryStatus === 'fail_me') {
+      return {
+        backgroundColor: '#ffc107',
+        textColor: '#333'
+      };
+    }
+    // 1.2 未揭露（該帳號尚未開放地點功能）：灰色
+    if (regionQueryStatus === 'fail_not_rollout_yet') {
+      return {
+        backgroundColor: getGrayLabelBgColor(),
+        textColor: 'white'
+      };
+    }
+    // 1.3 其他情況：黃色（預設）
     return {
       backgroundColor: '#ffc107',
       textColor: '#333'
@@ -1032,7 +1146,7 @@ function getRegionColor(region, profile = null, account = null) {
   // 2.2 灰色：profile tag 有符合 GRAY_FLAG_PROFILE_TAGS 或 地點標籤有符合 GRAY_FLAG_LOCATION，或地點標籤為 Not shared 或 [未揭露null]
   if (hasGrayFlagProfileTag || isGrayFlagLocation) {
     return {
-      backgroundColor: GRAY_LABEL_BG_COLOR,
+      backgroundColor: getGrayLabelBgColor(),
       textColor: 'white'
     };
   }
@@ -1054,84 +1168,120 @@ function setPostContentColor(element, isGray) {
   try {
     // DOM 結構分析（根據實際 Threads DOM）:
     // 
-    // 結構一（純文字貼文）與結構二（帶附圖貼文）:
-    // element (<a href="/@username">) 在用戶資訊區
-    //   -> 向上找到貼文根容器（通常是包含用戶頭像、名稱、時間的區塊）
-    //   -> 該容器的兄弟 div 包含貼文內容
-    //   -> 內容區域中的 span[dir="auto"] > span (貼文文字)
+    // 每個貼文區塊的結構：
+    // <div class="x1a2a7pz x1n2onr6"> (貼文容器)
+    //   <div> (內部容器)
+    //     <div> (用戶資訊區：頭像、用戶名、標籤、時間)
+    //     <div> (貼文內容區：文字、圖片、影片)
     //
-    // 關鍵：貼文內容區通常是用戶資訊區的下一個兄弟 div
+    // 關鍵：找到包含此用戶名稱的貼文容器，只處理該容器內的內容
     
-    let processedCount = 0;
+    // 找到貼文容器（向上查找 class 包含 x1a2a7pz 的 div）
+    let postContainer = element.closest('div.x1a2a7pz');
+    if (!postContainer) {
+      // 備用方案：找到 data-pressable-container 的容器
+      postContainer = element.closest('[data-pressable-container]');
+    }
+    if (!postContainer) {
+      return;
+    }
     
-    // 找到 element 所在的貼文區塊（向上最多 10 層）
-    let current = element;
-    for (let i = 0; i < 10 && current; i++) {
-      const parent = current.parentElement;
-      if (!parent) break;
-      
-      // 檢查 parent 的下一個兄弟元素
-      let sibling = parent.nextElementSibling;
-      while (sibling) {
-        if (sibling.tagName === 'DIV') {
-          // 檢查這個 div 是否包含純用戶連結（排除 /post/ 和 /media 連結）
-          // 如果包含純用戶連結，這可能是用戶資訊區，跳過
-          const userLinks = sibling.querySelectorAll('a[href^="/@"]');
-          const hasPureUserLink = Array.from(userLinks).some(link => {
-            const href = link.getAttribute('href');
-            return href && !href.includes('/post/') && !href.includes('/media');
-          });
-          
-          if (hasPureUserLink) {
-            // 這個 div 包含用戶連結，可能是用戶資訊區，跳過
-            sibling = sibling.nextElementSibling;
-            continue;
-          }
-          
-          // 在這個兄弟 div 中尋找所有 span[dir="auto"]
-          const outerSpans = sibling.querySelectorAll('span[dir="auto"]');
-          
-          outerSpans.forEach((outerSpan, idx) => {
-            // 排除所有在連結內的 span（用戶連結、貼文連結、標籤連結等）
-            const parentLink = outerSpan.closest('a');
-            if (parentLink) {
-              return;
-            }
-            
-            // 排除時間元素內的 span
-            if (outerSpan.closest('time')) {
-              return;
-            }
-            
-            // 排除已經是我們標籤內的 span
-            if (outerSpan.closest('.threads-region-label')) {
-              return;
-            }
-            
-            // 目標是 outerSpan 內部的第一個 span（實際的文字內容）
-            const targetSpan = outerSpan.querySelector('span') || outerSpan;
-            
-            // 檢查內容是否像是時間格式（排除時間顯示）
-            const text = targetSpan.textContent || '';
-            if (/^\d{1,2}(小時|天|分鐘|秒)$/.test(text) || /^\d{4}-\d{1,2}-\d{1,2}$/.test(text)) {
-              return;
-            }
-            
-            if (isGray) {
-              targetSpan.style.color = GRAY_TEXT_COLOR;
-              processedCount++;
-            } else {
-              // 恢復原本顏色（移除 inline style）
-              targetSpan.style.removeProperty('color');
-            }
-          });
-        }
-        sibling = sibling.nextElementSibling;
+    // 處理此貼文容器內的頭像圖片（在用戶名稱附近的小頭像）
+    const avatarImgs = postContainer.querySelectorAll('img[alt*="大頭貼照"]');
+    avatarImgs.forEach(img => {
+      if (isGray) {
+        img.style.opacity = '0.5';
+        img.style.filter = 'grayscale(50%) brightness(0.8)';
+      } else {
+        img.style.removeProperty('opacity');
+        img.style.removeProperty('filter');
+      }
+    });
+    
+    // 處理貼文內容文字
+    // 在貼文容器內尋找所有 span[dir="auto"]
+    const outerSpans = postContainer.querySelectorAll('span[dir="auto"]');
+    
+    outerSpans.forEach((outerSpan) => {
+      // 排除所有在連結內的 span（用戶連結、貼文連結、標籤連結等）
+      const parentLink = outerSpan.closest('a');
+      if (parentLink) {
+        return;
       }
       
-      // 不要在這裡 break，繼續向上遍歷找更多內容
-      current = parent;
-    }
+      // 排除時間元素內的 span
+      if (outerSpan.closest('time')) {
+        return;
+      }
+      
+      // 排除已經是我們標籤內的 span
+      if (outerSpan.closest('.threads-region-label')) {
+        return;
+      }
+      
+      // 目標是 outerSpan 內部的第一個 span（實際的文字內容）
+      const targetSpan = outerSpan.querySelector('span') || outerSpan;
+      
+      // 檢查內容是否像是時間格式（排除時間顯示）
+      const text = targetSpan.textContent || '';
+      if (/^\d{1,2}(小時|天|分鐘|秒)$/.test(text) || /^\d{4}-\d{1,2}-\d{1,2}$/.test(text)) {
+        return;
+      }
+      
+      if (isGray) {
+        targetSpan.style.color = getGrayTextColor();
+      } else {
+        // 恢復原本顏色（移除 inline style）
+        targetSpan.style.removeProperty('color');
+      }
+    });
+    
+    // 處理視頻/圖片展示區塊的視覺效果
+    // 先檢查是否有視頻元素
+    const videos = postContainer.querySelectorAll('video');
+    const hasVideo = videos.length > 0;
+    
+    // 處理視頻元素
+    videos.forEach(video => {
+      if (isGray) {
+        video.style.opacity = '0.5';
+        video.style.filter = 'grayscale(50%) brightness(0.8)';
+      } else {
+        video.style.removeProperty('opacity');
+        video.style.removeProperty('filter');
+      }
+    });
+    
+    // 處理圖片元素（排除頭像，只處理貼文內容圖片）
+    const images = postContainer.querySelectorAll('img:not([alt*="大頭貼照"])');
+    images.forEach(img => {
+      if (isGray) {
+        if (hasVideo) {
+          // 有視頻時，將圖片設為完全透明（避免預覽圖蓋在視頻前面）
+          img.style.opacity = '0';
+        } else {
+          // 沒有視頻時，正常處理圖片
+          img.style.opacity = '0.5';
+          img.style.filter = 'grayscale(50%) brightness(0.8)';
+        }
+      } else {
+        img.style.removeProperty('opacity');
+        img.style.removeProperty('filter');
+      }
+    });
+    
+    // 處理 role="presentation" 的覆蓋層（如果它是用來遮擋的）
+    const presentationDivs = postContainer.querySelectorAll('div[role="presentation"]');
+    presentationDivs.forEach(div => {
+      if (isGray) {
+        // 嘗試讓覆蓋層變暗
+        div.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
+        div.style.pointerEvents = 'none';
+      } else {
+        div.style.removeProperty('background-color');
+        div.style.removeProperty('pointer-events');
+      }
+    });
     
   } catch (error) {
     console.log('[Threads] 設定貼文內容顏色時發生錯誤:', error);
@@ -1314,12 +1464,13 @@ function convertCountryNameToZhTw(countryName) {
 }
 
 /**
- * 生成標籤文字（包含地區和側寫）
+ * 生成標籤文字
  * @param {string|null} region - 地區
  * @param {string|null} profile - 側寫標籤（可能包含理由）
+ * @param {string|null} regionQueryStatus - 查詢狀態（可選）
  * @returns {string} 標籤文字
  */
-function generateLabelText(region, profile) {
+function generateLabelText(region, profile, regionQueryStatus = null) {
   let text;
   if (region) {
     const regionZh = convertCountryNameToZhTw(region);
@@ -1328,7 +1479,18 @@ function generateLabelText(region, profile) {
     // 有側寫但無地區，顯示「未揭露」
     text = `所在地：未揭露`;
   } else {
-    text = `所在地：待查詢`;
+    // 根據 regionQueryStatus 顯示不同文字
+    if (regionQueryStatus === 'in_progress') {
+      text = `所在地：查詢中`;
+    } else if (regionQueryStatus === 'fail_http429') {
+      text = `所在地：查詢失敗`;
+    } else if (regionQueryStatus === 'fail_me') {
+      text = `所在地：無法查詢`;
+    } else if (regionQueryStatus === 'fail_not_rollout_yet') {
+      text = `所在地：未揭露`;
+    } else {
+      text = `所在地：待查詢`;
+    }
   }
   if (profile) {
     // 顯示時只顯示標籤，不顯示理由
@@ -1342,9 +1504,10 @@ function generateLabelText(region, profile) {
  * 生成標籤 DOM 元素（包含地區和可點擊的側寫標籤）
  * @param {string|null} region - 地區
  * @param {string|null} profile - 側寫標籤（可能包含理由）
+ * @param {string|null} regionQueryStatus - 查詢狀態（可選）
  * @returns {HTMLElement} 標籤 DOM 元素
  */
-function generateLabelElement(region, profile) {
+function generateLabelElement(region, profile, regionQueryStatus = null) {
   const container = document.createElement('span');
   container.className = 'threads-label-text';
 
@@ -1356,7 +1519,18 @@ function generateLabelElement(region, profile) {
   } else if (profile) {
     locationText = `所在地：未揭露`;
   } else {
-    locationText = `所在地：待查詢`;
+    // 根據 regionQueryStatus 顯示不同文字
+    if (regionQueryStatus === 'in_progress') {
+      locationText = `所在地：查詢中`;
+    } else if (regionQueryStatus === 'fail_http429') {
+      locationText = `所在地：查詢失敗`;
+    } else if (regionQueryStatus === 'fail_me') {
+      locationText = `所在地：無法查詢`;
+    } else if (regionQueryStatus === 'fail_not_rollout_yet') {
+      locationText = `所在地：未揭露`;
+    } else {
+      locationText = `所在地：待查詢`;
+    }
   }
 
   const locationSpan = document.createTextNode(locationText);
@@ -1405,13 +1579,16 @@ function showRegionLabelsOnPage(regionData) {
       // 解析 regionData，支援新舊格式
       let region = null;
       let profile = null;
+      let regionQueryStatus = null;
       const accountData = regionData[account];
       
       if (accountData) {
         if (typeof accountData === 'object' && accountData !== null) {
-          // 新格式: { region: "Taiwan", profile: "標籤" }
+          // 新格式: { region: "Taiwan", profile: "標籤", regionQueryStatus: "success" }
           region = accountData.region;
           profile = accountData.profile;
+          regionQueryStatus = accountData.regionQueryStatus;
+          console.log(`[Threads] ${account} - region: ${region}, profile: ${profile}, regionQueryStatus: ${regionQueryStatus}`);
         } else {
           // 舊格式: "Taiwan"
           region = accountData;
@@ -1425,7 +1602,7 @@ function showRegionLabelsOnPage(regionData) {
 
         // 更新文字（選擇文字 span，不是三角形 span）
         const labelTextSpan = existingLabel.querySelector('.threads-label-text') || existingLabel;
-        const newText = generateLabelText(region, profile);
+        const newText = generateLabelText(region, profile, regionQueryStatus);
 
         //console.log(`[Threads] 更新標籤文字 ${account}: ${region}`);
 
@@ -1434,7 +1611,7 @@ function showRegionLabelsOnPage(regionData) {
           existingLabel.innerHTML = '';
           
           // 重建時加入三角形
-          const colors = getRegionColor(region, profile);
+          const colors = getRegionColor(region, profile, account, regionQueryStatus);
           existingLabel.style.position = 'relative';
           existingLabel.style.marginLeft = '12px';
           
@@ -1453,7 +1630,7 @@ function showRegionLabelsOnPage(regionData) {
           existingLabel.appendChild(arrow);
           
           // 使用可點擊的標籤元素
-          const labelElement = generateLabelElement(region, profile);
+          const labelElement = generateLabelElement(region, profile, regionQueryStatus);
           existingLabel.appendChild(labelElement);
 
           // 如果是待查詢且沒有 [C] 按鈕，添加（但如果已有側寫則視為已完成）
@@ -1462,7 +1639,7 @@ function showRegionLabelsOnPage(regionData) {
           }
         } else {
           // 替換為可點擊的標籤元素
-          const newLabelElement = generateLabelElement(region, profile);
+          const newLabelElement = generateLabelElement(region, profile, regionQueryStatus);
           labelTextSpan.replaceWith(newLabelElement);
 
           // 處理 [C] 按鈕
@@ -1484,7 +1661,7 @@ function showRegionLabelsOnPage(regionData) {
         }
 
         // 更新顏色（根據地區和側寫標籤使用對應顏色）
-        const colors = getRegionColor(region, profile, account);
+        const colors = getRegionColor(region, profile, account, regionQueryStatus);
         existingLabel.style.backgroundColor = colors.backgroundColor;
         existingLabel.style.color = colors.textColor;
 
@@ -1498,7 +1675,7 @@ function showRegionLabelsOnPage(regionData) {
         existingLabel.style.display = 'inline-flex';
 
         // 處理手動信任按鈕（只在灰色標籤時顯示）
-        const isGray = colors.backgroundColor === GRAY_LABEL_BG_COLOR;
+        const isGray = colors.backgroundColor === getGrayLabelBgColor();
         if (isGray && !isInManualTrustList(account)) {
           addManualTrustButton(existingLabel, account);
         } else {
@@ -1517,7 +1694,7 @@ function showRegionLabelsOnPage(regionData) {
       }
 
       // 根據地區和側寫標籤取得對應顏色
-      const colors = getRegionColor(region, profile, account);
+      const colors = getRegionColor(region, profile, account, regionQueryStatus);
 
       // 判斷是否需要查詢按鈕（只有待查詢狀態需要，已有地區或已有側寫則視為已完成）
       const needButton = !region && !profile;
@@ -1562,7 +1739,7 @@ function showRegionLabelsOnPage(regionData) {
       label.appendChild(arrow);
 
       // 創建文字部分（使用可點擊的標籤元素）
-      const labelText = generateLabelElement(region, profile);
+      const labelText = generateLabelElement(region, profile, regionQueryStatus);
       label.appendChild(labelText);
 
       // 如果需要，添加 [C] 按鈕
@@ -1587,8 +1764,125 @@ function showRegionLabelsOnPage(regionData) {
         //console.log(`[Threads] 成功添加 ${account} 的標籤: ${labelText} 2`);
       }
 
+      // 檢測是否正在追蹤此用戶
+      let isFollowing = true;
+      try {
+        let currentElement = label;
+        for (let i = 0; i < 10; i++) {
+          if (!currentElement.parentElement) break;
+          currentElement = currentElement.parentElement;
+          
+          const followSvg = currentElement.querySelector('svg[aria-label="Follow"]') ||
+                           currentElement.querySelector('svg[aria-label="追蹤"]');
+          
+          if (followSvg) {
+            isFollowing = false;
+            break;
+          }
+        }
+        
+        userData.isFollowing = isFollowing;
+        //console.log(`[Threads] ${account} 追蹤狀態: ${isFollowing ? '已追蹤' : '未追蹤'}`);
+      } catch (error) {
+        console.log(`[Threads] 檢測追蹤狀態時發生錯誤 (${account}):`, error);
+        userData.isFollowing = true;
+      }
+
+      // 檢測是否為認證用戶
+      let isVerified = false;
+      try {
+        let currentElement = label;
+        for (let i = 0; i < 10; i++) {
+          if (!currentElement.parentElement) break;
+          currentElement = currentElement.parentElement;
+          
+          const verifiedSvg = currentElement.querySelector('svg[aria-label="Verified"]') ||
+                             currentElement.querySelector('svg[aria-label="已驗證"]');
+          
+          if (verifiedSvg) {
+            isVerified = true;
+            break;
+          }
+        }
+        
+        userData.isVerified = isVerified;
+        //console.log(`[Threads] ${account} 認證狀態: ${isVerified ? '已認證' : '未認證'}`);
+      } catch (error) {
+        console.log(`[Threads] 檢測認證狀態時發生錯誤 (${account}):`, error);
+        userData.isVerified = false;
+      }
+
+      // 檢測互動數據（按讚、回覆、轉發數量）
+      let likeCount = 0;
+      let replyCount = 0;
+      let repostCount = 0;
+      try {
+        let currentElement = label;
+        for (let i = 0; i < 10; i++) {
+          if (!currentElement.parentElement) break;
+          currentElement = currentElement.parentElement;
+          
+          // 查找 Like SVG 和對應的數字
+          const likeSvg = currentElement.querySelector('svg[aria-label="Like"]') ||
+                         currentElement.querySelector('svg[aria-label="讚"]');
+          if (likeSvg && likeCount === 0) {
+            const likeButton = likeSvg.closest('[role="button"]');
+            if (likeButton) {
+              const likeSpan = likeButton.querySelector('span[dir="auto"]');
+              if (likeSpan) {
+                const likeText = likeSpan.textContent.trim();
+                likeCount = parseEngagementCount(likeText);
+              }
+            }
+          }
+          
+          // 查找 Reply SVG 和對應的數字
+          const replySvg = currentElement.querySelector('svg[aria-label="Reply"]') ||
+                          currentElement.querySelector('svg[aria-label="回覆"]');
+          if (replySvg && replyCount === 0) {
+            const replyButton = replySvg.closest('[role="button"]');
+            if (replyButton) {
+              const replySpan = replyButton.querySelector('span[dir="auto"]');
+              if (replySpan) {
+                const replyText = replySpan.textContent.trim();
+                replyCount = parseEngagementCount(replyText);
+              }
+            }
+          }
+          
+          // 查找 Repost SVG 和對應的數字
+          const repostSvg = currentElement.querySelector('svg[aria-label="Repost"]') ||
+                           currentElement.querySelector('svg[aria-label="轉發"]');
+          if (repostSvg && repostCount === 0) {
+            const repostButton = repostSvg.closest('[role="button"]');
+            if (repostButton) {
+              const repostSpan = repostButton.querySelector('span[dir="auto"]');
+              if (repostSpan) {
+                const repostText = repostSpan.textContent.trim();
+                repostCount = parseEngagementCount(repostText);
+              }
+            }
+          }
+          
+          // 如果三個數據都找到了，就停止搜尋
+          if (likeCount > 0 && replyCount > 0 && repostCount > 0) {
+            break;
+          }
+        }
+        
+        userData.likeCount = likeCount;
+        userData.replyCount = replyCount;
+        userData.repostCount = repostCount;
+        //console.log(`[Threads] ${account} 互動數據: 讚 ${likeCount}, 回覆 ${replyCount}, 轉發 ${repostCount}`);
+      } catch (error) {
+        console.log(`[Threads] 檢測互動數據時發生錯誤 (${account}):`, error);
+        userData.likeCount = 0;
+        userData.replyCount = 0;
+        userData.repostCount = 0;
+      }
+
       // 處理手動信任按鈕（只在灰色標籤時顯示）
-      const isGray = colors.backgroundColor === GRAY_LABEL_BG_COLOR;
+      const isGray = colors.backgroundColor === getGrayLabelBgColor();
       if (isGray && !isInManualTrustList(account)) {
         addManualTrustButton(label, account);
       }
@@ -1793,7 +2087,7 @@ function addQueryButton(labelElement, account, index, labelTextSpan) {
         // 如果標籤為灰色，將貼文內容也設為灰色
         const userElement = labelElement.parentElement;
         if (userElement && userElement.tagName === 'A' && userElement.href && userElement.href.includes('/@')) {
-          const isGray = colors.backgroundColor === GRAY_LABEL_BG_COLOR;
+          const isGray = colors.backgroundColor === getGrayLabelBgColor();
           setPostContentColor(userElement, isGray);
         }
 
@@ -1815,9 +2109,23 @@ function addQueryButton(labelElement, account, index, labelTextSpan) {
           console.log('[Threads] 同步查詢結果到 sidepanel 失敗:', err.message);
         });
       } else {
-        // 查詢失敗或未找到地區資訊，設置為未揭露
-        const colors = getRegionColor('未揭露', profileText || null, accountToQuery);
-        labelTextSpan.textContent = generateLabelText('未揭露', profileText || null);
+        // 查詢失敗或未找到地區資訊
+        // 檢查錯誤類型以決定顯示文字
+        let regionQueryStatus = null;
+        if (response && response.error) {
+          if (response.error === 'HTTP_429') {
+            regionQueryStatus = 'fail_http429';
+          } else if (response.error === 'ME_UI_ISSUE') {
+            regionQueryStatus = 'fail_me';
+          }
+        }
+        // 如果沒有錯誤類型，預設為 fail_not_rollout_yet
+        if (!regionQueryStatus) {
+          regionQueryStatus = 'fail_not_rollout_yet';
+        }
+        
+        const colors = getRegionColor(null, profileText || null, accountToQuery, regionQueryStatus);
+        labelTextSpan.textContent = generateLabelText(null, profileText || null, regionQueryStatus);
         labelElement.style.backgroundColor = colors.backgroundColor;
         labelElement.style.color = colors.textColor;
         // 更新三角形顏色
@@ -1828,10 +2136,10 @@ function addQueryButton(labelElement, account, index, labelTextSpan) {
         queryButton.remove();
         // 添加重新整理按鈕
         addRefreshButton(labelElement, accountToQuery, labelTextSpan);
-        console.log(`[Threads] 查詢完成但未找到地區: ${accountToQuery}${profileText ? ` (${profileText})` : ''}`);
+        console.log(`[Threads] 查詢完成但未找到地區: ${accountToQuery}${profileText ? ` (${profileText})` : ''}, status: ${regionQueryStatus}`);
 
         // 處理手動信任按鈕（只在灰色標籤時顯示）
-        const isGray = colors.backgroundColor === GRAY_LABEL_BG_COLOR;
+        const isGray = colors.backgroundColor === getGrayLabelBgColor();
         if (isGray && !isInManualTrustList(accountToQuery)) {
           addManualTrustButton(labelElement, accountToQuery);
         }
@@ -1843,10 +2151,17 @@ function addQueryButton(labelElement, account, index, labelTextSpan) {
         }
 
         // 將查詢結果同步到 sidepanel 的 currentGetUserListArray
+        // 根據 regionQueryStatus 決定顯示的文字
+        let displayRegion = '未揭露';
+        if (regionQueryStatus === 'fail_http429') {
+          displayRegion = '查詢失敗';
+        } else if (regionQueryStatus === 'fail_me') {
+          displayRegion = '無法查詢';
+        }
         chrome.runtime.sendMessage({
           action: 'updateUserRegion',
           account: accountToQuery,
-          region: '未揭露'
+          region: displayRegion
         }).catch(err => {
           console.log('[Threads] 同步查詢結果到 sidepanel 失敗:', err.message);
         });
@@ -1889,7 +2204,7 @@ function addQueryButton(labelElement, account, index, labelTextSpan) {
       addRefreshButton(labelElement, accountToQuery, labelTextSpan);
 
       // 處理手動信任按鈕（只在灰色標籤時顯示）
-      const isGray = colors.backgroundColor === GRAY_LABEL_BG_COLOR;
+      const isGray = colors.backgroundColor === getGrayLabelBgColor();
       if (isGray && !isInManualTrustList(accountToQuery)) {
         addManualTrustButton(labelElement, accountToQuery);
       }
@@ -2087,7 +2402,7 @@ function addRefreshButton(labelElement, account, labelTextSpan) {
         }
 
         // 處理手動信任按鈕（只在灰色標籤時顯示）
-        const isGray = colors.backgroundColor === GRAY_LABEL_BG_COLOR;
+        const isGray = colors.backgroundColor === getGrayLabelBgColor();
         if (isGray && !isInManualTrustList(accountToRefresh)) {
           addManualTrustButton(labelElement, accountToRefresh);
         } else {
@@ -2122,9 +2437,24 @@ function addRefreshButton(labelElement, account, labelTextSpan) {
           console.log('[Threads] 同步查詢結果到 sidepanel 失敗:', err.message);
         });
       } else {
-        const colors = getRegionColor('未揭露', profileText || null, accountToRefresh);
+        // 查詢失敗或未找到地區資訊
+        // 檢查錯誤類型以決定顯示文字
+        let regionQueryStatus = null;
+        if (response && response.error) {
+          if (response.error === 'HTTP_429') {
+            regionQueryStatus = 'fail_http429';
+          } else if (response.error === 'ME_UI_ISSUE') {
+            regionQueryStatus = 'fail_me';
+          }
+        }
+        // 如果沒有錯誤類型，預設為 fail_not_rollout_yet
+        if (!regionQueryStatus) {
+          regionQueryStatus = 'fail_not_rollout_yet';
+        }
+        
+        const colors = getRegionColor(null, profileText || null, accountToRefresh, regionQueryStatus);
         // 使用 generateLabelElement 重建完整的標籤元素
-        const newLabelElement = generateLabelElement('未揭露', profileText || null);
+        const newLabelElement = generateLabelElement(null, profileText || null, regionQueryStatus);
         currentLabelNode.replaceWith(newLabelElement);
         labelElement.style.backgroundColor = colors.backgroundColor;
         labelElement.style.color = colors.textColor;
@@ -2133,7 +2463,7 @@ function addRefreshButton(labelElement, account, labelTextSpan) {
         }
 
         // 處理手動信任按鈕（只在灰色標籤時顯示）
-        const isGray = colors.backgroundColor === GRAY_LABEL_BG_COLOR;
+        const isGray = colors.backgroundColor === getGrayLabelBgColor();
         if (isGray && !isInManualTrustList(accountToRefresh)) {
           addManualTrustButton(labelElement, accountToRefresh);
         } else {
@@ -2151,10 +2481,17 @@ function addRefreshButton(labelElement, account, labelTextSpan) {
         }
 
         // 同步到 sidepanel
+        // 根據 regionQueryStatus 決定顯示的文字
+        let displayRegion = '未揭露';
+        if (regionQueryStatus === 'fail_http429') {
+          displayRegion = '查詢失敗';
+        } else if (regionQueryStatus === 'fail_me') {
+          displayRegion = '無法查詢';
+        }
         chrome.runtime.sendMessage({
           action: 'updateUserRegion',
           account: accountToRefresh,
-          region: '未揭露'
+          region: displayRegion
         }).catch(err => {
           console.log('[Threads] 同步查詢結果到 sidepanel 失敗:', err.message);
         });
@@ -2172,7 +2509,7 @@ function addRefreshButton(labelElement, account, labelTextSpan) {
       }
 
       // 處理手動信任按鈕（只在灰色標籤時顯示）
-      const isGray = colors.backgroundColor === GRAY_LABEL_BG_COLOR;
+      const isGray = colors.backgroundColor === getGrayLabelBgColor();
       if (isGray && !isInManualTrustList(accountToRefresh)) {
         addManualTrustButton(labelElement, accountToRefresh);
       } else {
@@ -2412,6 +2749,28 @@ function isElementVisible(element) {
 }
 
 /**
+ * 檢查元素是否在可見視窗下方（即將被捲動看到的區域）
+ * @param {Element} element - 要檢查的 DOM 元素
+ * @returns {boolean} 是否在可見區域下方
+ */
+function isElementComingVisible(element) {
+  if (!element) return false;
+
+  const rect = element.getBoundingClientRect();
+  const windowHeight = window.innerHeight || document.documentElement.clientHeight;
+  const windowWidth = window.innerWidth || document.documentElement.clientWidth;
+
+  // 檢查元素是否在視窗下方（top 位置超過視窗高度，且在水平範圍內）
+  const isBelowViewport = (
+    rect.top >= windowHeight &&
+    rect.left < windowWidth &&
+    rect.right > 0
+  );
+
+  return isBelowViewport;
+}
+
+/**
  * 查找當前可見範圍內的用戶元素
  * @returns {Array<Object>} 可見用戶的資料，格式：[{account, element, index}, ...]
  */
@@ -2421,8 +2780,7 @@ function getVisibleUsers() {
   currentUserElementsData.forEach((userData, index) => {
     if (isElementVisible(userData.element)) {
       visibleUsers.push({
-        account: userData.account,
-        element: userData.element,
+        ...userData,  // 包含所有原始資料（isFollowing, isVerified, likeCount, etc.）
         index: index
       });
     }
@@ -2433,34 +2791,90 @@ function getVisibleUsers() {
 }
 
 /**
+ * 查找即將顯示的用戶元素（位於可見區域下方）
+ * @returns {Array<Object>} 即將顯示的用戶資料，格式：[{account, element, index}, ...]
+ */
+function getComingVisibleUsers() {
+  const comingVisibleUsers = [];
+
+  currentUserElementsData.forEach((userData, index) => {
+    if (isElementComingVisible(userData.element)) {
+      const rect = userData.element.getBoundingClientRect();
+      // 返回完整的 userData，並添加 top 位置資訊
+      comingVisibleUsers.push({
+        ...userData,  // 包含所有原始資料（isFollowing, isVerified, likeCount, etc.）
+        index: index,
+        top: rect.top
+      });
+    }
+  });
+
+  // 按照 top 位置升序排列（較近的元素在前面）
+  comingVisibleUsers.sort((a, b) => a.top - b.top);
+
+  console.log(`[Threads] 找到 ${comingVisibleUsers.length} 個即將顯示的用戶`);
+  if (comingVisibleUsers.length > 0) {
+    console.log('[Threads] 即將顯示的用戶列表（由近到遠）:', comingVisibleUsers.map(u => `${u.account} (top: ${Math.round(u.top)})`).join(', '));
+  }
+  return comingVisibleUsers;
+}
+
+/**
  * 自動查詢可見範圍內未查詢的用戶
  */
 async function autoQueryVisibleUsers() {
   try {
-    // 從 chrome.storage 讀取自動查詢設定
-    const storageResult = await chrome.storage.local.get(['autoQueryVisible']);
-    const shouldAutoQuery = storageResult.autoQueryVisible || false;
+    // 從 chrome.storage 讀取自動查詢設定（支援新舊格式）
+    const storageResult = await chrome.storage.local.get(['autoQueryMode', 'autoQueryVisible']);
+    let autoQueryMode = storageResult.autoQueryMode;
+    
+    // 向後兼容：如果沒有 autoQueryMode，檢查舊的 autoQueryVisible 設定
+    if (!autoQueryMode && storageResult.autoQueryVisible !== undefined) {
+      autoQueryMode = storageResult.autoQueryVisible ? 'visible' : 'off';
+    }
+    
+    // 預設為關閉
+    if (!autoQueryMode) {
+      autoQueryMode = 'off';
+    }
 
-    if (!shouldAutoQuery) {
+    if (autoQueryMode === 'off') {
       console.log('[Threads] 自動查詢未啟用');
       return;
     }
 
-    console.log('[Threads] 開始自動查詢可見用戶');
+    console.log(`[Threads] 開始自動查詢可見用戶（模式: ${autoQueryMode}）`);
 
-    // 獲取可見用戶
-    const visibleUsers = getVisibleUsers();
+    // 根據模式選擇要處理的用戶列表
+    let targetUsers = [];
+    
+    if (autoQueryMode === 'visible') {
+      // visible 模式：處理目前可見的用戶
+      targetUsers = getVisibleUsers();
+    } else if (autoQueryMode === 'smart') {
+      // smart 模式：檢查頁面是否剛載入
+      const scrollY = window.scrollY || window.pageYOffset || 0;
+      
+      if (scrollY < 10) {
+        // 頁面剛載入（scroll Y < 10），處理目前可見的用戶
+        console.log(`[Threads] 智慧模式：頁面剛載入 (scrollY: ${scrollY})，處理可見用戶`);
+        targetUsers = getVisibleUsers();
+      } else {
+        // 頁面已捲動，處理即將顯示的用戶（高互動陌生帳號優先）
+        console.log(`[Threads] 智慧模式：頁面已捲動 (scrollY: ${scrollY})，處理即將顯示的用戶`);
+        targetUsers = getComingVisibleUsers();
+      }
+    }
 
-    if (visibleUsers.length === 0) {
-      console.log('[Threads] 沒有可見用戶');
+    if (targetUsers.length === 0) {
+      console.log('[Threads] 沒有目標用戶');
       return;
     }
 
     // 找出尚未查詢的用戶（檢查標籤是否存在且為待查詢狀態）
-    const unqueriedVisibleUsers = visibleUsers.filter(user => {
+    let unqueriedUsers = targetUsers.filter(user => {
       const existingLabel = user.element.querySelector('.threads-region-label');
       if (!existingLabel) {
-        //console.log(`[Threads] ${user.account} 沒有標籤，需要查詢`);
         return true; // 沒有標籤，需要查詢
       }
 
@@ -2468,7 +2882,6 @@ async function autoQueryVisibleUsers() {
       const labelTextSpan = existingLabel.querySelector('.threads-label-text') || existingLabel;
       const labelText = (labelTextSpan.textContent || labelTextSpan.innerText || '').trim();
       if (labelText.includes('查詢中')) {
-        //console.log(`[Threads] ${user.account} 正在查詢中，跳過`);
         return false; // 正在查詢中，跳過
       }
 
@@ -2478,30 +2891,70 @@ async function autoQueryVisibleUsers() {
 
       // 如果不是待查詢狀態（已經有其他顏色），表示已查詢過（有 region 資料）
       if (!isWaitingToQuery) {
-        //console.log(`[Threads] ${user.account} 已查詢過（背景色: ${bgColor}），跳過`);
         return false; // 已查詢過，跳過
       }
-
-      //console.log(`[Threads] ${user.account} bgColor ${bgColor}`);
 
       // 待查詢且不是查詢中
       return true;
     });
 
-    console.log(`[Threads] 可見用戶中有 ${unqueriedVisibleUsers.length} 個待查詢`);
+    // smart 模式：額外篩選條件
+    if (autoQueryMode === 'smart') {
+      console.log(`[Threads] 智慧模式：篩選前有 ${unqueriedUsers.length} 個待查詢用戶`);
+      
+      // 篩選條件：isVerified == false, isFollowing == false, likeCount+replyCount+repostCount > 100
+      unqueriedUsers = unqueriedUsers.filter(user => {
+        const isVerified = user.isVerified || false;
+        const isFollowing = user.isFollowing !== false; // 預設為 true（已追蹤）
+        const likeCount = user.likeCount || 0;
+        const replyCount = user.replyCount || 0;
+        const repostCount = user.repostCount || 0;
+        const totalEngagement = likeCount + replyCount + repostCount;
+        
+        const shouldQuery = !isVerified && !isFollowing && totalEngagement > 100;
+        
+        // 詳細記錄每個用戶的篩選結果
+        console.log(`[Threads] 智慧模式檢查: ${user.account}`, {
+          isVerified: isVerified,
+          isFollowing: isFollowing,
+          likeCount: likeCount,
+          replyCount: replyCount,
+          repostCount: repostCount,
+          totalEngagement: totalEngagement,
+          通過認證檢查: !isVerified,
+          通過追蹤檢查: !isFollowing,
+          通過互動數檢查: totalEngagement > 100,
+          最終結果: shouldQuery ? '✓ 符合條件' : '✗ 不符合'
+        });
+        
+        return shouldQuery;
+      });
+      
+      // 按照互動數排序（由高到低）
+      unqueriedUsers.sort((a, b) => {
+        const engagementA = (a.likeCount || 0) + (a.replyCount || 0) + (a.repostCount || 0);
+        const engagementB = (b.likeCount || 0) + (b.replyCount || 0) + (b.repostCount || 0);
+        return engagementB - engagementA; // 降序排列
+      });
+      
+      console.log(`[Threads] 智慧模式：篩選後有 ${unqueriedUsers.length} 個高互動陌生帳號`);
+    }
 
-    if (unqueriedVisibleUsers.length === 0) {
-      console.log('[Threads] 所有可見用戶都已查詢');
+    console.log(`[Threads] ${autoQueryMode} 模式：有 ${unqueriedUsers.length} 個待查詢用戶`);
+
+    if (unqueriedUsers.length === 0) {
+      console.log('[Threads] 所有目標用戶都已查詢或不符合條件');
       return;
     }
 
     // 自動點擊查詢按鈕
-    for (const user of unqueriedVisibleUsers) {
+    for (const user of unqueriedUsers) {
       const existingLabel = user.element.querySelector('.threads-region-label');
       if (existingLabel) {
         const queryButton = existingLabel.querySelector('.threads-query-btn');
         if (queryButton) {
-          console.log(`[Threads] 自動查詢: ${user.account}`);
+          const engagement = (user.likeCount || 0) + (user.replyCount || 0) + (user.repostCount || 0);
+          console.log(`[Threads] 自動查詢 (${autoQueryMode}): ${user.account}${autoQueryMode === 'smart' ? ` (互動數: ${engagement})` : ''}`);
           queryButton.dataset.isAutoQuery = 'true'; // 標記為自動查詢，不使用優先隊列
           queryButton.click();
         }

@@ -194,8 +194,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     (async () => {
       try {
-        const region = await getCachedRegion(username);
-        sendResponse({ success: true, region });
+        const cachedData = await getCachedRegion(username);
+        sendResponse({ 
+          success: true, 
+          region: cachedData.region,
+          status: cachedData.status
+        });
       } catch (error) {
         console.error('[Background] 獲取緩存失敗:', error);
         sendResponse({ success: false, error: error.message });

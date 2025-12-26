@@ -20,12 +20,22 @@ const CACHE_KEY = 'regionCache'; // chrome.storage 中的鍵名
 const PROFILE_CACHE_KEY = 'profileCache'; // 用戶側寫快取的鍵名
 const CACHE_EXPIRY_DAYS = 30; // 快取過期天數（30 天）
 
+// 查詢狀態常數
+const QUERY_STATUS = {
+  NOT_QUERIED: null,                    // 從未查詢過
+  IN_PROGRESS: 'in_progress',           // 查詢中
+  FAIL_HTTP429: 'fail_http429',         // HTTP 429 錯誤
+  FAIL_ME: 'fail_me',                   // 自己的帳號暫無法查詢
+  FAIL_NOT_ROLLOUT: 'fail_not_rollout_yet', // 該帳號上無地點顯示功能
+  SUCCESS: 'success'                    // 查詢成功
+};
+
 // ==================== 快取管理 ====================
 
 /**
  * 從快取中讀取用戶地區
  * @param {string} username - 用戶帳號（不含 @ 符號）
- * @returns {Promise<string|null>} 返回地區或 null（未找到或已過期）
+ * @returns {Promise<{region: string|null, status: string|null}>} 返回地區和查詢狀態
  */
 async function getCachedRegion(username) {
   try {
@@ -40,42 +50,47 @@ async function getCachedRegion(username) {
       // 檢查是否過期
       if (now - cached.timestamp < expiryTime) {
         //console.log(`[Cache] 命中快取 @${username}: ${cached.region} (保存於 ${new Date(cached.timestamp).toLocaleString()})`);
-        return cached.region;
+        return {
+          region: cached.region || null,
+          status: cached.regionQueryStatus || null
+        };
       } else {
         //console.log(`[Cache] 快取已過期 @${username} (保存於 ${new Date(cached.timestamp).toLocaleString()})`);
         // 刪除過期的快取
         delete cache[username];
         await chrome.storage.local.set({ [CACHE_KEY]: cache });
-        return null;
+        return { region: null, status: null };
       }
     }
 
     //console.log(`[Cache] 未找到快取 @${username}`);
-    return null;
+    return { region: null, status: null };
   } catch (error) {
     console.error('[Cache] 讀取快取失敗:', error);
-    return null;
+    return { region: null, status: null };
   }
 }
 
 /**
  * 將用戶地區保存到快取
  * @param {string} username - 用戶帳號（不含 @ 符號）
- * @param {string} region - 地區
+ * @param {string|null} region - 地區（可為 null）
+ * @param {string|null} status - 查詢狀態（使用 QUERY_STATUS 常數）
  * @returns {Promise<void>}
  */
-async function saveCachedRegion(username, region) {
+async function saveCachedRegion(username, region, status = QUERY_STATUS.SUCCESS) {
   try {
     const result = await chrome.storage.local.get([CACHE_KEY]);
     const cache = result[CACHE_KEY] || {};
 
     cache[username] = {
       region: region,
+      regionQueryStatus: status,
       timestamp: Date.now()
     };
 
     await chrome.storage.local.set({ [CACHE_KEY]: cache });
-    console.log(`[Cache] 已保存 region 快取 @${username}`);
+    console.log(`[Cache] 已保存 region 快取 @${username}, status: ${status}`);
   } catch (error) {
     console.error('[Cache] 保存 region 快取失敗:', error);
   }
@@ -576,6 +591,10 @@ async function executeQuery(username, shouldKeepTab = false, keepTabFilter = '')
       throw new Error('Content script 未能載入');
     }
 
+    // 在發送查詢請求前，先將狀態記錄為 IN_PROGRESS
+    await saveCachedRegion(cleanUsername, null, QUERY_STATUS.IN_PROGRESS);
+    console.log(`[QueryManager] 開始查詢 @${cleanUsername}，狀態: IN_PROGRESS`);
+
     // Content script 已準備好，發送查詢請求
     const response = await chrome.tabs.sendMessage(newTab.id, {
       action: 'autoQueryRegion',
@@ -609,7 +628,9 @@ async function executeQuery(username, shouldKeepTab = false, keepTabFilter = '')
       console.log(`[QueryManager] 查詢成功 @${cleanUsername}: ${region}`);
 
       // 保存到快取（必須在關閉分頁之前，因為 safeCloseTab 會觸發 refreshRegionLabels）
-      await saveCachedRegion(cleanUsername, region);
+      // 如果 region 為 null，表示該帳號尚未開放地點功能
+      const status = region ? QUERY_STATUS.SUCCESS : QUERY_STATUS.FAIL_NOT_ROLLOUT;
+      await saveCachedRegion(cleanUsername, region, status);
 
       if (shouldCloseTab && newTab) {
         await safeCloseTab(newTab.id, originalTabId);
@@ -618,15 +639,47 @@ async function executeQuery(username, shouldKeepTab = false, keepTabFilter = '')
       return {
         success: true,
         region: region,
+        status: status,
         fromCache: false
       };
     } else {
+      // 檢查是否為 ME_UI_ISSUE 錯誤（自己的帳號）
+      if (response && response.error === 'ME_UI_ISSUE') {
+        console.log(`[QueryManager] ME_UI_ISSUE 錯誤: ${response.errorMessage}`);
+        
+        // 保存 FAIL_ME 狀態到快取
+        await saveCachedRegion(cleanUsername, null, QUERY_STATUS.FAIL_ME);
+        
+        // 關閉查詢分頁
+        if (newTab) {
+          await safeCloseTab(newTab.id, originalTabId);
+        }
+        
+        return {
+          success: false,
+          error: 'ME_UI_ISSUE',
+          status: QUERY_STATUS.FAIL_ME,
+          errorMessage: response.errorMessage
+        };
+      }
+      
       // 檢查是否為 HTTP 429 錯誤
       if (response && response.error === 'HTTP_429') {
         console.error(`[QueryManager] HTTP 429 錯誤: ${response.errorMessage}`);
         
+        // 保存 HTTP 429 狀態到快取
+        await saveCachedRegion(cleanUsername, null, QUERY_STATUS.FAIL_HTTP429);
+        
+        // 根據設定決定是否關閉分頁
+        // HTTP 429 錯誤視為查詢失敗，如果有開啟「查詢後保留結果分頁」則保留分頁
+        let shouldCloseTab = !shouldKeepTab;
+        
+        if (shouldKeepTab) {
+          console.log(`[QueryManager] HTTP 429 錯誤，但已開啟「查詢後保留結果分頁」，保留分頁`);
+        }
+        
         // 關閉查詢分頁
-        if (newTab) {
+        if (shouldCloseTab && newTab) {
           await safeCloseTab(newTab.id, originalTabId);
         }
         
@@ -643,6 +696,7 @@ async function executeQuery(username, shouldKeepTab = false, keepTabFilter = '')
         return {
           success: false,
           error: 'HTTP_429',
+          status: QUERY_STATUS.FAIL_HTTP429,
           errorMessage: response.errorMessage
         };
       }
@@ -672,6 +726,9 @@ async function executeQuery(username, shouldKeepTab = false, keepTabFilter = '')
     if (isContentScriptError) {
       console.error(`[QueryManager] Content script 未能載入，可能是 HTTP 429 錯誤 @${cleanUsername}`);
       
+      // 保存 HTTP 429 狀態到快取
+      await saveCachedRegion(cleanUsername, null, QUERY_STATUS.FAIL_HTTP429);
+      
       // 關閉查詢分頁
       if (newTab) {
         await safeCloseTab(newTab.id, originalTabId);
@@ -690,6 +747,7 @@ async function executeQuery(username, shouldKeepTab = false, keepTabFilter = '')
       return {
         success: false,
         error: 'HTTP_429',
+        status: QUERY_STATUS.FAIL_HTTP429,
         errorMessage: '已經超過查詢用量上限'
       };
     }
@@ -948,6 +1006,10 @@ async function executeIntegratedQuery(username, enableProfileAnalysis = false, s
       throw new Error('Content script 未能載入');
     }
 
+    // 在發送查詢請求前，先將狀態記錄為 IN_PROGRESS
+    await saveCachedRegion(cleanUsername, null, QUERY_STATUS.IN_PROGRESS);
+    console.log(`[QueryManager] 開始查詢 @${cleanUsername}，狀態: IN_PROGRESS`);
+
     // 發送地點查詢請求
     const response = await chrome.tabs.sendMessage(queryTab.id, {
       action: 'autoQueryRegion',
@@ -977,7 +1039,9 @@ async function executeIntegratedQuery(username, enableProfileAnalysis = false, s
       console.log(`[QueryManager] 查詢成功 @${cleanUsername}: ${region}`);
 
       // 保存到快取（必須在關閉分頁之前，因為 safeCloseTab 會觸發 refreshRegionLabels）
-      await saveCachedRegion(cleanUsername, region);
+      // 如果 region 為 null，表示該帳號尚未開放地點功能
+      const status = region ? QUERY_STATUS.SUCCESS : QUERY_STATUS.FAIL_NOT_ROLLOUT;
+      await saveCachedRegion(cleanUsername, region, status);
 
       if (shouldCloseTab && queryTab) {
         await safeCloseTab(queryTab.id, originalTabId);
@@ -986,15 +1050,47 @@ async function executeIntegratedQuery(username, enableProfileAnalysis = false, s
       return {
         success: true,
         region: region,
+        status: status,
         fromCache: false
       };
     } else {
+      // 檢查是否為 ME_UI_ISSUE 錯誤（自己的帳號）
+      if (response && response.error === 'ME_UI_ISSUE') {
+        console.log(`[QueryManager] ME_UI_ISSUE 錯誤: ${response.errorMessage}`);
+        
+        // 保存 FAIL_ME 狀態到快取
+        await saveCachedRegion(cleanUsername, null, QUERY_STATUS.FAIL_ME);
+        
+        // 關閉查詢分頁
+        if (queryTab) {
+          await safeCloseTab(queryTab.id, originalTabId);
+        }
+        
+        return {
+          success: false,
+          error: 'ME_UI_ISSUE',
+          status: QUERY_STATUS.FAIL_ME,
+          errorMessage: response.errorMessage
+        };
+      }
+      
       // 檢查是否為 HTTP 429 錯誤
       if (response && response.error === 'HTTP_429') {
         console.error(`[QueryManager] HTTP 429 錯誤: ${response.errorMessage}`);
         
+        // 保存 HTTP 429 狀態到快取
+        await saveCachedRegion(cleanUsername, null, QUERY_STATUS.FAIL_HTTP429);
+        
+        // 根據設定決定是否關閉分頁
+        // HTTP 429 錯誤視為查詢失敗，如果有開啟「查詢後保留結果分頁」則保留分頁
+        let shouldCloseTab = !shouldKeepTab;
+        
+        if (shouldKeepTab) {
+          console.log(`[QueryManager] HTTP 429 錯誤，但已開啟「查詢後保留結果分頁」，保留分頁`);
+        }
+        
         // 關閉查詢分頁
-        if (queryTab) {
+        if (shouldCloseTab && queryTab) {
           await safeCloseTab(queryTab.id, originalTabId);
         }
         
@@ -1011,6 +1107,7 @@ async function executeIntegratedQuery(username, enableProfileAnalysis = false, s
         return {
           success: false,
           error: 'HTTP_429',
+          status: QUERY_STATUS.FAIL_HTTP429,
           errorMessage: response.errorMessage
         };
       }
@@ -1040,6 +1137,9 @@ async function executeIntegratedQuery(username, enableProfileAnalysis = false, s
     if (isContentScriptError) {
       console.error(`[QueryManager] Content script 未能載入，可能是 HTTP 429 錯誤 @${cleanUsername}`);
       
+      // 保存 HTTP 429 狀態到快取
+      await saveCachedRegion(cleanUsername, null, QUERY_STATUS.FAIL_HTTP429);
+      
       // 關閉查詢分頁
       if (queryTab) {
         await safeCloseTab(queryTab.id, originalTabId);
@@ -1058,6 +1158,7 @@ async function executeIntegratedQuery(username, enableProfileAnalysis = false, s
       return {
         success: false,
         error: 'HTTP_429',
+        status: QUERY_STATUS.FAIL_HTTP429,
         errorMessage: '已經超過查詢用量上限'
       };
     }
@@ -1278,12 +1379,13 @@ async function queryUserRegion(username, shouldKeepTab = null, forceRefresh = fa
 
   // 如果不是強制刷新，先檢查快取
   if (!forceRefresh) {
-    const cachedRegion = await getCachedRegion(cleanUsername);
-    if (cachedRegion !== null) {
-      console.log(`[QueryManager] 使用快取數據 @${cleanUsername}: ${cachedRegion}`);
+    const cachedData = await getCachedRegion(cleanUsername);
+    if (cachedData.region !== null || cachedData.status !== null) {
+      console.log(`[QueryManager] 使用快取數據 @${cleanUsername}: ${cachedData.region}, status: ${cachedData.status}`);
       return {
-        success: true,
-        region: cachedRegion,
+        success: cachedData.status === QUERY_STATUS.SUCCESS,
+        region: cachedData.region,
+        status: cachedData.status,
         fromCache: true
       };
     }
@@ -1362,6 +1464,7 @@ function updateMaxConcurrent(value) {
 
 // ==================== 導出 ====================
 export {
+  QUERY_STATUS,
   queryUserRegion,
   getQueueStatus,
   getCachedRegion,

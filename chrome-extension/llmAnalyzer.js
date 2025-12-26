@@ -6,6 +6,7 @@
 
 // ==================== LLM 配置 ====================
 const OPENAI_MODEL_NAME = 'gpt-5-mini'; // OpenAI 模型名稱
+const CLAUDE_MODEL_NAME = 'claude-haiku-4-5-20251001'; // Claude 模型名稱
 
 /**
  * 從 chrome.storage 讀取是否使用本地 LLM
@@ -27,6 +28,30 @@ async function getOpenAIApiKey() {
   return new Promise((resolve) => {
     chrome.storage.local.get(['openaiApiKey'], (result) => {
       resolve(result.openaiApiKey || null);
+    });
+  });
+}
+
+/**
+ * 從 chrome.storage 讀取 Claude API Key
+ * @returns {Promise<string|null>}
+ */
+async function getClaudeApiKey() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['claudeApiKey'], (result) => {
+      resolve(result.claudeApiKey || null);
+    });
+  });
+}
+
+/**
+ * 從 chrome.storage 讀取使用的 LLM Provider
+ * @returns {Promise<string>} 'openai', 'claude', 或 'local'
+ */
+async function getLLMProvider() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['llmProvider'], (result) => {
+      resolve(result.llmProvider || 'openai');
     });
   });
 }
@@ -197,6 +222,68 @@ async function callOpenAI(systemPrompt, userPrompt) {
   }
 }
 
+// ==================== Claude API 呼叫 ====================
+
+/**
+ * 呼叫 Claude API
+ * @param {string} systemPrompt - 系統提示詞
+ * @param {string} userPrompt - 用戶提示詞
+ * @returns {Promise<{success: boolean, content?: string, error?: string}>}
+ */
+async function callClaude(systemPrompt, userPrompt) {
+  try {
+    const apiKey = await getClaudeApiKey();
+    
+    if (!apiKey) {
+      throw new Error('Claude API Key 未設定，請在進階功能中設定');
+    }
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL_NAME,
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages: [
+          { role: 'user', content: userPrompt }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(`Claude API 錯誤: ${response.status} - ${errorData.error?.message || response.statusText}`);
+    }
+
+    const data = await response.json();
+    //console.log('[Claude] API 回應:', JSON.stringify(data, null, 2));
+    
+    const content = data.content?.[0]?.text;
+
+    if (!content) {
+      console.error('[Claude] 回應中沒有 content，完整回應:', data);
+      throw new Error('Claude API 回應格式錯誤');
+    }
+
+    return {
+      success: true,
+      content: content.trim()
+    };
+  } catch (error) {
+    console.error('[Claude] ❌ Error:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
 // ==================== Profile 分析 ====================
 
 /**
@@ -311,15 +398,28 @@ async function analyzeUserProfile(socialPostContent, socialReplyContent, targetU
         fullResponse += chunk;
       }
     } else {
-      // ==================== 使用 OpenAI API ====================
-      console.log('[OpenAI] Calling OpenAI API...');
-      const openAIResult = await callOpenAI(LLM_SYSTEM_PROMPT, userPromptFinal);
+      // ==================== 使用遠端 API (OpenAI 或 Claude) ====================
+      const llmProvider = await getLLMProvider();
       
-      if (!openAIResult.success) {
-        throw new Error(openAIResult.error);
+      if (llmProvider === 'claude') {
+        console.log('[Claude] Calling Claude API...');
+        const claudeResult = await callClaude(LLM_SYSTEM_PROMPT, userPromptFinal);
+        
+        if (!claudeResult.success) {
+          throw new Error(claudeResult.error);
+        }
+        
+        fullResponse = claudeResult.content;
+      } else {
+        console.log('[OpenAI] Calling OpenAI API...');
+        const openAIResult = await callOpenAI(LLM_SYSTEM_PROMPT, userPromptFinal);
+        
+        if (!openAIResult.success) {
+          throw new Error(openAIResult.error);
+        }
+        
+        fullResponse = openAIResult.content;
       }
-      
-      fullResponse = openAIResult.content;
     }
 
     console.log('[LLM] ✅ Generation completed.');

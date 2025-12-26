@@ -3,7 +3,8 @@ const accountInput = document.getElementById('accountInput');
 const keepTabCheckbox = document.getElementById('keepTabCheckbox');
 const keepTabFilterContainer = document.getElementById('keepTabFilterContainer');
 const keepTabFilterInput = document.getElementById('keepTabFilterInput');
-const autoQueryVisibleCheckbox = document.getElementById('autoQueryVisibleCheckbox');
+const autoQueryModeSelect = document.getElementById('autoQueryModeSelect');
+const autoQueryModeDescription = document.getElementById('autoQueryModeDescription');
 const maxConcurrentContainer = document.getElementById('maxConcurrentContainer');
 const maxConcurrentInput = document.getElementById('maxConcurrentInput');
 const llmProfileAnalysisCheckbox = document.getElementById('llmProfileAnalysisCheckbox');
@@ -28,9 +29,16 @@ const apiKeySetIndicator = document.getElementById('apiKeySetIndicator');
 const apiKeyInputContainer = document.getElementById('apiKeyInputContainer');
 const editApiKeyBtn = document.getElementById('editApiKeyBtn');
 const clearApiKeyBtn = document.getElementById('clearApiKeyBtn');
+const claudeApiKeyInput = document.getElementById('claudeApiKeyInput');
+const claudeApiKeyStatus = document.getElementById('claudeApiKeyStatus');
+const claudeApiKeySetIndicator = document.getElementById('claudeApiKeySetIndicator');
+const claudeApiKeyInputContainer = document.getElementById('claudeApiKeyInputContainer');
+const editClaudeApiKeyBtn = document.getElementById('editClaudeApiKeyBtn');
+const clearClaudeApiKeyBtn = document.getElementById('clearClaudeApiKeyBtn');
 const llmProviderSection = document.getElementById('llmProviderSection');
 const llmProviderSelect = document.getElementById('llmProviderSelect');
 const openaiConfigPanel = document.getElementById('openaiConfigPanel');
+const claudeConfigPanel = document.getElementById('claudeConfigPanel');
 const localLLMConfigPanel = document.getElementById('localLLMConfigPanel');
 const localLLMStatus = document.getElementById('localLLMStatus');
 
@@ -353,9 +361,10 @@ async function showRegionLabelsInternal() {
             action: 'getCachedRegion',
             username: username
           });
-          if (regionResponse && regionResponse.success && regionResponse.region) {
+          if (regionResponse && regionResponse.success) {
             region = regionResponse.region;
             user.region = regionResponse.region; // 同步更新 user 物件
+            user.regionQueryStatus = regionResponse.status; // 同步更新查詢狀態
           }
         } catch (error) {
           console.log(`[Sidepanel] 讀取地區快取失敗 ${username}:`, error);
@@ -384,10 +393,11 @@ async function showRegionLabelsInternal() {
 
       // 只要有地點或側寫其中之一，就加入 regionData
       // 這樣可以正確顯示已查詢到的地點（即使側寫尚未取得或使用者停用側寫功能）
-      if (region !== null || profile !== null) {
+      if (region !== null || profile !== null || user.regionQueryStatus) {
         regionData[user.account] = {
           region: region,
-          profile: profile
+          profile: profile,
+          regionQueryStatus: user.regionQueryStatus || null
         };
       }
     }
@@ -768,13 +778,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       updateStatus(errorMessage, 'error');
     }, 500);
     
-    // 如果「自動查詢」選項是開啟的，自動關閉它
-    if (autoQueryVisibleCheckbox && autoQueryVisibleCheckbox.checked) {
+    // 如果「自動查詢」選項不是關閉狀態，自動關閉它
+    if (autoQueryModeSelect && autoQueryModeSelect.value !== 'off') {
       console.log('[Sidepanel] 自動關閉「自動查詢」選項');
-      autoQueryVisibleCheckbox.checked = false;
+      autoQueryModeSelect.value = 'off';
       
       // 保存到 chrome.storage
-      chrome.storage.local.set({ autoQueryVisible: false }, () => {
+      chrome.storage.local.set({ autoQueryMode: 'off' }, () => {
         console.log('[Sidepanel] 已關閉自動查詢設定');
       });
       
@@ -794,7 +804,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // ==================== Checkbox 狀態管理 ====================
 
 // 初始化：從 chrome.storage 讀取 checkbox 狀態
-chrome.storage.local.get(['keepTabAfterQuery', 'keepTabFilter', 'autoQueryVisible', 'maxConcurrentQueries', 'llmProfileAnalysis'], (result) => {
+chrome.storage.local.get(['keepTabAfterQuery', 'keepTabFilter', 'autoQueryMode', 'autoQueryVisible', 'maxConcurrentQueries', 'llmProfileAnalysis'], (result) => {
   if (result.keepTabAfterQuery !== undefined) {
     keepTabCheckbox.checked = result.keepTabAfterQuery;
     // 根據 checkbox 狀態顯示/隱藏過濾條件輸入框
@@ -811,12 +821,31 @@ chrome.storage.local.get(['keepTabAfterQuery', 'keepTabFilter', 'autoQueryVisibl
       console.log('[Sidepanel] 初始化保留分頁過濾條件預設值:', defaultFilter);
     });
   }
-  if (result.autoQueryVisible !== undefined) {
-    autoQueryVisibleCheckbox.checked = result.autoQueryVisible;
-    // 根據 checkbox 狀態顯示/隱藏最大並行查詢數輸入框
-    maxConcurrentContainer.style.display = result.autoQueryVisible ? 'block' : 'none';
-    console.log('[Sidepanel] 載入自動查詢可見用戶設定:', result.autoQueryVisible);
+  
+  // 處理自動查詢模式設定（支援從舊版 autoQueryVisible 遷移）
+  if (result.autoQueryMode !== undefined) {
+    autoQueryModeSelect.value = result.autoQueryMode;
+    console.log('[Sidepanel] 載入自動查詢模式設定:', result.autoQueryMode);
+  } else if (result.autoQueryVisible !== undefined) {
+    // 從舊版設定遷移：autoQueryVisible: true 對應到 'visible' 模式
+    const migratedMode = result.autoQueryVisible ? 'visible' : 'off';
+    autoQueryModeSelect.value = migratedMode;
+    // 保存新格式並移除舊設定
+    chrome.storage.local.set({ autoQueryMode: migratedMode }, () => {
+      console.log('[Sidepanel] 從舊版遷移自動查詢設定:', migratedMode);
+    });
+    chrome.storage.local.remove('autoQueryVisible');
+  } else {
+    // 預設為 smart 模式
+    autoQueryModeSelect.value = 'smart';
   }
+  
+  // 根據自動查詢模式顯示/隱藏最大並行查詢數輸入框
+  maxConcurrentContainer.style.display = (autoQueryModeSelect.value !== 'off') ? 'block' : 'none';
+  
+  // 更新說明文字
+  updateAutoQueryModeDescription();
+  
   if (result.maxConcurrentQueries !== undefined) {
     maxConcurrentInput.value = result.maxConcurrentQueries;
     console.log('[Sidepanel] 載入最大並行查詢數設定:', result.maxConcurrentQueries);
@@ -846,14 +875,27 @@ keepTabFilterInput.addEventListener('change', () => {
   });
 });
 
-// 監聽 autoQueryVisibleCheckbox 變化，保存到 chrome.storage
-autoQueryVisibleCheckbox.addEventListener('change', () => {
-  const isChecked = autoQueryVisibleCheckbox.checked;
-  chrome.storage.local.set({ autoQueryVisible: isChecked }, () => {
-    console.log('[Sidepanel] 保存自動查詢可見用戶設定:', isChecked);
+// 更新自動查詢模式說明文字
+function updateAutoQueryModeDescription() {
+  const mode = autoQueryModeSelect.value;
+  const descriptions = {
+    'off': '僅作手動查詢',
+    'smart': '預先針對高互動陌生帳號自動做查詢',
+    'visible': '當顯示在頁面時，自動做查詢'
+  };
+  autoQueryModeDescription.textContent = descriptions[mode] || '';
+}
+
+// 監聽 autoQueryModeSelect 變化，保存到 chrome.storage
+autoQueryModeSelect.addEventListener('change', () => {
+  const mode = autoQueryModeSelect.value;
+  chrome.storage.local.set({ autoQueryMode: mode }, () => {
+    console.log('[Sidepanel] 保存自動查詢模式設定:', mode);
   });
-  // 顯示/隱藏最大並行查詢數輸入框
-  maxConcurrentContainer.style.display = isChecked ? 'block' : 'none';
+  // 顯示/隱藏最大並行查詢數輸入框（只有在非關閉模式時顯示）
+  maxConcurrentContainer.style.display = (mode !== 'off') ? 'block' : 'none';
+  // 更新說明文字
+  updateAutoQueryModeDescription();
 });
 
 // 監聽 maxConcurrentInput 變化，保存到 chrome.storage 並通知 background 更新 queryManager
@@ -896,15 +938,21 @@ function updateLLMProviderUI() {
   llmProviderSection.style.display = 'block';
   
   // 根據選擇的 provider 顯示對應的配置面板
-  const useLocalLLM = llmProviderSelect.value === 'local';
+  const provider = llmProviderSelect.value;
   
-  if (useLocalLLM) {
+  if (provider === 'local') {
     openaiConfigPanel.style.display = 'none';
+    claudeConfigPanel.style.display = 'none';
     localLLMConfigPanel.style.display = 'block';
     // 檢查本地 LLM 可用性
     checkLocalLLMAvailability();
+  } else if (provider === 'claude') {
+    openaiConfigPanel.style.display = 'none';
+    claudeConfigPanel.style.display = 'block';
+    localLLMConfigPanel.style.display = 'none';
   } else {
     openaiConfigPanel.style.display = 'block';
+    claudeConfigPanel.style.display = 'none';
     localLLMConfigPanel.style.display = 'none';
   }
 }
@@ -961,9 +1009,14 @@ llmProfileAnalysisCheckbox.addEventListener('change', () => {
 
 // 監聽 LLM Provider 選擇變化
 llmProviderSelect.addEventListener('change', () => {
-  const useLocalLLM = llmProviderSelect.value === 'local';
-  chrome.storage.local.set({ useLocalLLM: useLocalLLM }, () => {
-    console.log('[Sidepanel] 切換到', useLocalLLM ? '本地 LLM' : 'OpenAI API');
+  const provider = llmProviderSelect.value;
+  const useLocalLLM = provider === 'local';
+  
+  chrome.storage.local.set({ 
+    useLocalLLM: useLocalLLM,
+    llmProvider: provider 
+  }, () => {
+    console.log('[Sidepanel] 切換到', provider === 'local' ? '本地 LLM' : provider === 'claude' ? 'Claude API' : 'OpenAI API');
   });
   updateLLMProviderUI();
 });
@@ -976,6 +1029,17 @@ function updateApiKeyDisplayState(hasApiKey) {
   } else {
     apiKeySetIndicator.style.display = 'none';
     apiKeyInputContainer.style.display = 'inline';
+  }
+}
+
+// 更新 Claude API Key 顯示狀態（已設定時隱藏輸入框，顯示 edit 按鈕）
+function updateClaudeApiKeyDisplayState(hasApiKey) {
+  if (hasApiKey) {
+    claudeApiKeySetIndicator.style.display = 'inline';
+    claudeApiKeyInputContainer.style.display = 'none';
+  } else {
+    claudeApiKeySetIndicator.style.display = 'none';
+    claudeApiKeyInputContainer.style.display = 'inline';
   }
 }
 
@@ -1000,8 +1064,30 @@ clearApiKeyBtn.addEventListener('click', () => {
   updateApiKeyDisplayState(false);
 });
 
-// 初始化：從 chrome.storage 讀取 OpenAI API Key 和 LLM Provider 設定
-chrome.storage.local.get(['openaiApiKey', 'useLocalLLM'], (result) => {
+// 監聽 edit Claude API key 按鈕點擊
+editClaudeApiKeyBtn.addEventListener('click', () => {
+  claudeApiKeySetIndicator.style.display = 'none';
+  claudeApiKeyInputContainer.style.display = 'inline';
+  claudeApiKeyInput.focus();
+});
+
+// 監聽 clear Claude API key 按鈕點擊
+clearClaudeApiKeyBtn.addEventListener('click', () => {
+  claudeApiKeyInput.value = '';
+  chrome.storage.local.remove('claudeApiKey', () => {
+    console.log('[Sidepanel] 已清除 Claude API Key');
+    claudeApiKeyStatus.textContent = '已清除';
+    claudeApiKeyStatus.className = 'api-key-status';
+    setTimeout(() => {
+      claudeApiKeyStatus.textContent = '';
+    }, 2000);
+  });
+  updateClaudeApiKeyDisplayState(false);
+});
+
+// 初始化：從 chrome.storage 讀取 OpenAI API Key、Claude API Key 和 LLM Provider 設定
+chrome.storage.local.get(['openaiApiKey', 'claudeApiKey', 'useLocalLLM', 'llmProvider'], (result) => {
+  // OpenAI API Key
   if (result.openaiApiKey) {
     openaiApiKeyInput.value = result.openaiApiKey;
     console.log('[Sidepanel] 載入 OpenAI API Key');
@@ -1010,8 +1096,20 @@ chrome.storage.local.get(['openaiApiKey', 'useLocalLLM'], (result) => {
     updateApiKeyDisplayState(false);
   }
   
+  // Claude API Key
+  if (result.claudeApiKey) {
+    claudeApiKeyInput.value = result.claudeApiKey;
+    console.log('[Sidepanel] 載入 Claude API Key');
+    updateClaudeApiKeyDisplayState(true);
+  } else {
+    updateClaudeApiKeyDisplayState(false);
+  }
+  
   // 設定 LLM Provider 選擇
-  if (result.useLocalLLM === true) {
+  if (result.llmProvider) {
+    llmProviderSelect.value = result.llmProvider;
+    console.log('[Sidepanel] 載入 LLM Provider 設定:', result.llmProvider);
+  } else if (result.useLocalLLM === true) {
     llmProviderSelect.value = 'local';
     console.log('[Sidepanel] 載入 LLM Provider 設定: 本地 LLM');
   } else {
@@ -1057,6 +1155,45 @@ openaiApiKeyInput.addEventListener('input', () => {
       setTimeout(() => {
         apiKeyStatus.textContent = '';
         updateApiKeyDisplayState(true);
+      }, 2000);
+    });
+  }, 500);
+});
+
+// 當 Claude API Key 輸入框內容變化時，自動儲存
+let claudeApiKeySaveTimeout = null;
+claudeApiKeyInput.addEventListener('input', () => {
+  const apiKey = claudeApiKeyInput.value.trim();
+  
+  // 清除之前的延遲儲存
+  if (claudeApiKeySaveTimeout) {
+    clearTimeout(claudeApiKeySaveTimeout);
+  }
+  
+  // 延遲 500ms 後自動儲存
+  claudeApiKeySaveTimeout = setTimeout(() => {
+    if (!apiKey) {
+      claudeApiKeyStatus.textContent = '';
+      claudeApiKeyStatus.className = 'api-key-status';
+      return;
+    }
+    
+    // 簡單驗證 Claude API Key 格式
+    if (!apiKey.startsWith('sk-ant-')) {
+      claudeApiKeyStatus.textContent = '格式不正確';
+      claudeApiKeyStatus.className = 'api-key-status error';
+      return;
+    }
+    
+    chrome.storage.local.set({ claudeApiKey: apiKey }, () => {
+      console.log('[Sidepanel] 自動儲存 Claude API Key');
+      claudeApiKeyStatus.textContent = '✓ 已儲存';
+      claudeApiKeyStatus.className = 'api-key-status saved';
+      
+      // 2 秒後清除狀態訊息並切換到已設定狀態
+      setTimeout(() => {
+        claudeApiKeyStatus.textContent = '';
+        updateClaudeApiKeyDisplayState(true);
       }, 2000);
     });
   }, 500);
