@@ -58,7 +58,7 @@ async function getLLMProvider() {
 
 const LLM_SYSTEM_PROMPT = '你是一個內容風險與風格標註器。請嚴格依照使用者規則輸出，且只輸出 YAML（不得有任何前綴、說明或 Markdown）。只使用繁體中文。';
 const UF_KEYWORD="憨鳥,萊爾賴,萊爾校長,綠共,青鳥真是腦殘,賴皮寮,氫鳥,賴清德戒嚴,賴清德獨裁,賴喪,冥禁黨,賴功德,萊爾,萊爾校長"
-const TAG_SAMPLE="生活帳,生活日常,情緒宣洩,憤世抱怨,攻擊發言,酸言酸語,政治帳,立場鮮明,易怒,惡意嘲諷,謾罵,人身攻擊,溫暖陪伴,真誠分享,情感支持,理性討論,仇恨言論,觀點交流,社會關懷,同理傾聽,個人成長, 詐騙風險, 刻意引戰; 相反的屬性：(生活帳 vs 政治帳) , (攻擊發言, 仇恨言論, 易怒,謾罵,情緒宣洩,刻意引戰,憤世抱怨 vs 理性討論,觀點交流) , (人身攻擊,惡意嘲諷,易怒,謾罵,情緒宣洩,刻意引戰,憤世抱怨 vs 溫暖陪伴, 真誠分享,情感支持,同理傾聽,個人成長) 等，需擇一不能同時出現。\n";
+const TAG_SAMPLE="生活帳,生活日常,情緒宣洩,憤世抱怨,攻擊發言,酸言酸語,政治帳,立場鮮明,易怒,惡意嘲諷,謾罵,人身攻擊,溫暖陪伴,真誠分享,情感支持,理性討論,仇恨言論,觀點交流,社會關懷,同理傾聽,個人成長, 詐騙風險, 刻意引戰; 相反的屬性：(生活帳 vs 政治帳) , (攻擊發言, 仇恨言論, 易怒,謾罵,情緒宣洩,刻意引戰,憤世抱怨 vs 理性討論,觀點交流) , (人身攻擊,惡意嘲諷,易怒,謾罵,情緒宣洩,刻意引戰,憤世抱怨 vs 溫暖陪伴, 真誠分享,情感支持,同理傾聽,個人成長) 等，需擇一不能同時出現。\n分享自身被詐騙經驗，提醒他人避免受騙，要使用「詐騙提醒」tag而非「詐騙風險」";
 const ORDER_FIRST_TAGS="詐騙風險,統戰言論,人身攻擊,仇恨言論"
 /**
  * 解析 YAML 格式的標籤列表
@@ -178,40 +178,24 @@ async function callOpenAI(systemPrompt, userPrompt) {
       throw new Error('OpenAI API Key 未設定，請在進階功能中設定');
     }
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: OPENAI_MODEL_NAME,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        max_completion_tokens: 4096
-      })
+    console.log('[OpenAI] 通過 background 調用 API...');
+    
+    // 通過 background service worker 調用 API
+    const response = await chrome.runtime.sendMessage({
+      action: 'callOpenAIAPI',
+      systemPrompt: systemPrompt,
+      userPrompt: userPrompt,
+      apiKey: apiKey,
+      modelName: OPENAI_MODEL_NAME
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(`OpenAI API 錯誤: ${response.status} - ${errorData.error?.message || response.statusText}`);
-    }
-
-    const data = await response.json();
-    //console.log('[OpenAI] API 回應:', JSON.stringify(data, null, 2));
-    
-    const content = data.choices?.[0]?.message?.content;
-
-    if (!content) {
-      console.error('[OpenAI] 回應中沒有 content，完整回應:', data);
-      throw new Error('OpenAI API 回應格式錯誤');
+    if (!response.success) {
+      throw new Error(response.error || 'OpenAI API 調用失敗');
     }
 
     return {
       success: true,
-      content: content.trim()
+      content: response.content
     };
   } catch (error) {
     console.error('[OpenAI] ❌ Error:', error);
@@ -238,42 +222,24 @@ async function callClaude(systemPrompt, userPrompt) {
       throw new Error('Claude API Key 未設定，請在進階功能中設定');
     }
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({
-        model: CLAUDE_MODEL_NAME,
-        max_tokens: 4096,
-        system: systemPrompt,
-        messages: [
-          { role: 'user', content: userPrompt }
-        ]
-      })
+    console.log('[Claude] 通過 background 調用 API...');
+    
+    // 通過 background service worker 調用 API
+    const response = await chrome.runtime.sendMessage({
+      action: 'callClaudeAPI',
+      systemPrompt: systemPrompt,
+      userPrompt: userPrompt,
+      apiKey: apiKey,
+      modelName: CLAUDE_MODEL_NAME
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(`Claude API 錯誤: ${response.status} - ${errorData.error?.message || response.statusText}`);
-    }
-
-    const data = await response.json();
-    //console.log('[Claude] API 回應:', JSON.stringify(data, null, 2));
-    
-    const content = data.content?.[0]?.text;
-
-    if (!content) {
-      console.error('[Claude] 回應中沒有 content，完整回應:', data);
-      throw new Error('Claude API 回應格式錯誤');
+    if (!response.success) {
+      throw new Error(response.error || 'Claude API 調用失敗');
     }
 
     return {
       success: true,
-      content: content.trim()
+      content: response.content
     };
   } catch (error) {
     console.error('[Claude] ❌ Error:', error);

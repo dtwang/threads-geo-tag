@@ -262,7 +262,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         console.log(`[Threads] 開始自動化查詢 @${account} 的所在地區`);
 
         // 檢查是否遇到 HTTP 429 錯誤
-        const is429Error = checkFor429Error();
+        const is429Error = checkFor429Error(account);
         if (is429Error) {
           console.log(`[Threads] 偵測到 HTTP 429 錯誤`);
           sendResponse({
@@ -914,9 +914,10 @@ function getNextSpanText(element) {
 
 /**
  * 檢查頁面是否顯示 HTTP 429 錯誤
+ * @param {string} account - 查詢的帳號名稱（可包含或不包含 @ 符號）
  * @returns {boolean} 是否為 429 錯誤頁面
  */
-function checkFor429Error() {
+function checkFor429Error(account) {
   try {
     // 檢查頁面標題
     const pageTitle = document.title || '';
@@ -936,7 +937,6 @@ function checkFor429Error() {
     const error429Patterns = [
       /HTTP ERROR 429/i,           // Chrome 預設錯誤頁面
       /HTTP.*429/i,                 // 其他 HTTP 429 格式
-      /429/,                        // 直接包含 429
       /too many requests/i,
       /rate limit/i,
       /請求過多/i,
@@ -945,22 +945,30 @@ function checkFor429Error() {
       /這個網頁無法正常運作/i      // Chrome 中文錯誤頁面
     ];
 
-    for (const pattern of error429Patterns) {
-      if (pattern.test(bodyText)) {
-        console.log(`[Threads] 在頁面內容中偵測到 429 錯誤，匹配模式: ${pattern}`);
-        return true;
-      }
-    }
-
-    // 檢查是否有錯誤訊息元素
-    const errorElements = document.querySelectorAll('[class*="error"], [class*="Error"], [id*="error"], [id*="Error"]');
-    console.log(`[Threads] 找到 ${errorElements.length} 個錯誤元素`);
+    // 移除 @ 符號（如果有的話）
+    const username = account ? (account.startsWith('@') ? account.slice(1) : account) : '';
     
-    for (const el of errorElements) {
-      const text = el.innerText || el.textContent || '';
-      if (/429|too many requests|rate limit|HTTP ERROR/i.test(text)) {
-        console.log(`[Threads] 在錯誤元素中偵測到 429 錯誤: "${text.substring(0, 100)}"`);
-        return true;
+    // only check content if pageTitle does not contain user account name
+    if (!pageTitle.includes(username)) {
+    
+      for (const pattern of error429Patterns) {
+        if (pattern.test(bodyText)) {
+          console.log(`[Threads] 在頁面內容中偵測到 429 錯誤，匹配模式: ${pattern}`);
+          return true;
+        }
+      }
+
+
+      // 檢查是否有錯誤訊息元素
+      const errorElements = document.querySelectorAll('[class*="error"], [class*="Error"], [id*="error"], [id*="Error"]');
+      console.log(`[Threads] 找到 ${errorElements.length} 個錯誤元素`);
+      
+      for (const el of errorElements) {
+        const text = el.innerText || el.textContent || '';
+        if (/429|too many requests|rate limit|HTTP ERROR/i.test(text)) {
+          console.log(`[Threads] 在錯誤元素中偵測到 429 錯誤: "${text.substring(0, 100)}"`);
+          return true;
+        }
       }
     }
 
@@ -1576,6 +1584,24 @@ function showRegionLabelsOnPage(regionData) {
         return;
       }
 
+      // 粉絲頁面上的效能優化：檢查元素是否在可視範圍
+      const followerCounter = document.getElementById('followerLabelCounter');
+      if (followerCounter) {
+        // 檢查該用戶元素是否在可視範圍內
+        const rect = element.getBoundingClientRect();
+        const isInViewport = (
+          rect.top < (window.innerHeight || document.documentElement.clientHeight) &&
+          rect.bottom > 0 &&
+          rect.left < (window.innerWidth || document.documentElement.clientWidth) &&
+          rect.right > 0
+        );
+        
+        // 如果不在可視範圍，跳過此用戶的處理
+        if (!isInViewport) {
+          return;
+        }
+      }
+
       // 解析 regionData，支援新舊格式
       let region = null;
       let profile = null;
@@ -1909,6 +1935,12 @@ function showRegionLabelsOnPage(regionData) {
 
   }
 
+  // 更新 followerLabelCounter 元素（如果存在）
+  const followerLabelCounter = document.getElementById('followerLabelCounter');
+  if (followerLabelCounter) {
+    followerLabelCounter.textContent = `${totalCount}/`;
+  }
+
   return {
     addedCount: addedCount,
     totalCount: totalCount
@@ -1969,6 +2001,7 @@ function addQueryButton(labelElement, account, index, labelTextSpan) {
     queryButton.disabled = true;
     queryButton.textContent = '...';
     queryButton.style.cursor = 'not-allowed';
+    queryButton.classList.add('querying');
 
     // 將標籤文字從「待查詢」改成「查詢中」
     labelTextSpan.textContent = `所在地：查詢中`;
@@ -2011,6 +2044,7 @@ function addQueryButton(labelElement, account, index, labelTextSpan) {
         queryButton.disabled = false;
         queryButton.textContent = '查詢';
         queryButton.style.cursor = 'pointer';
+        queryButton.classList.remove('querying');
         
         // 保持標籤文字為「待查詢」（不變）
         labelTextSpan.textContent = `所在地：待查詢`;
@@ -2030,6 +2064,7 @@ function addQueryButton(labelElement, account, index, labelTextSpan) {
         queryButton.disabled = false;
         queryButton.textContent = '查詢';
         queryButton.style.cursor = 'pointer';
+        queryButton.classList.remove('querying');
         
         // 恢復標籤文字為「待查詢」
         labelTextSpan.textContent = `所在地：待查詢`;
@@ -2301,19 +2336,6 @@ function addRefreshButton(labelElement, account, labelTextSpan) {
     refreshButton.disabled = true;
     refreshButton.style.cursor = 'not-allowed';
     refreshButton.style.animation = 'spin 1s linear infinite';
-
-    // 添加旋轉動畫樣式（如果還沒有）
-    if (!document.getElementById('threads-refresh-spin-style')) {
-      const style = document.createElement('style');
-      style.id = 'threads-refresh-spin-style';
-      style.textContent = `
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-      `;
-      document.head.appendChild(style);
-    }
 
     // 1. 先清除標籤上顯示的地區與側寫，重建為純文字節點
     // 移除原有的 labelTextSpan 內容，替換為新的文字節點
@@ -2983,6 +3005,12 @@ function handlePageScroll(skipThrottle = false) {
   
   console.log('[Threads] 頁面捲動，通知 sidepanel 更新用戶列表');
 
+  // 檢查 extension context 是否仍有效
+  if (!chrome.runtime?.id) {
+    console.log('[Threads] Extension context 已失效，請重新整理頁面');
+    return;
+  }
+
   // 發送消息到 sidepanel
   chrome.runtime.sendMessage({
     action: 'pageScrolled'
@@ -3073,6 +3101,45 @@ function findProfilePageFollowerElement() {
 // ==================== URL 變化監聽（SPA 支援）====================
 
 /**
+ * 在粉絲數字下方添加 followerLabelCounter span
+ */
+function addFollowerLabelCounter() {
+  const tablist = document.querySelector('div[role="tablist"]');
+  if (!tablist) {
+    console.log('[Threads] 找不到 role="tablist" 元素');
+    return;
+  }
+
+  const followerTab = tablist.querySelector('div[aria-label="粉絲"]');
+  if (!followerTab) {
+    console.log('[Threads] 找不到 aria-label="粉絲" 元素');
+    return;
+  }
+
+  const followerCountSpan = followerTab.querySelector('span[title]');
+  if (!followerCountSpan) {
+    console.log('[Threads] 找不到粉絲數字 span');
+    return;
+  }
+
+  if (document.getElementById('followerLabelCounter')) {
+    console.log('[Threads] followerLabelCounter 已存在');
+    return;
+  }
+
+  const counterSpan = document.createElement('span');
+  counterSpan.id = 'followerLabelCounter';
+  counterSpan.textContent = '0/';
+  
+  followerCountSpan.parentElement.insertBefore(
+    counterSpan,
+    followerCountSpan
+  );
+
+  console.log('[Threads] followerLabelCounter 已添加');
+}
+
+/**
  * 設置用戶資料頁的粉絲頁滾動監聽器
  * 當切換到用戶資料頁時調用
  */
@@ -3089,8 +3156,6 @@ function setupProfilePageFollowerListener() {
     profilePageCheckTimer = null;
   }
 
-  // 重置狀態
-  profilePageHasAddedScrollListener = false;
 
   if (!threadsProfileRegex.test(currentUrl)) {
     return;
@@ -3099,7 +3164,10 @@ function setupProfilePageFollowerListener() {
   console.log('[Threads] 檢測到用戶資料頁，幫粉絲頁加入事件監聽器');
 
   profilePageCheckTimer = setInterval(() => {
-    if (profilePageHasAddedScrollListener) return;
+
+    const followerCounterChecker = document.getElementById('followerLabelCounter');
+    
+    if (followerCounterChecker) return;
 
     const element = findProfilePageFollowerElement();
 
@@ -3111,10 +3179,9 @@ function setupProfilePageFollowerListener() {
         () => handlePageScroll(false),
         { passive: true }
       );
-
-      profilePageHasAddedScrollListener = true;
-      clearInterval(profilePageCheckTimer);
-      profilePageCheckTimer = null;
+      
+      addFollowerLabelCounter();
+      
     }
   }, 10000); // 每 10 秒檢查一次
 }
@@ -3179,6 +3246,44 @@ function initPageFeatures() {
   }
 
   console.log('[Threads] 檢測到 threads.com，開始初始化功能');
+
+  // 注入動畫樣式（確保在任何按鈕被點擊前就已經存在）
+  if (!document.getElementById('threads-animation-styles')) {
+    const style = document.createElement('style');
+    style.id = 'threads-animation-styles';
+    style.textContent = `
+      @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+      @keyframes dotRotate {
+        0% { content: '.  '; }
+        33% { content: '.. '; }
+        66% { content: '...'; }
+        100% { content: '.  '; }
+      }
+      .threads-query-btn.querying {
+        color: transparent !important;
+        position: relative;
+        font-weight: bold;
+      }
+      .threads-query-btn.querying::after {
+        content: '.  ';
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        bottom: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #333;
+        animation: dotRotate 1.2s steps(3, end) infinite;
+      }
+    `;
+    document.head.appendChild(style);
+    console.log('[Threads] 動畫樣式已注入');
+  }
 
   // 啟動捲動監聽器
   initScrollListener();

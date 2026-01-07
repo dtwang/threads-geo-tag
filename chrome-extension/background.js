@@ -417,5 +417,115 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  // 處理 Claude API 調用（從 sidepanel 路由）
+  if (request.action === 'callClaudeAPI') {
+    const { systemPrompt, userPrompt, apiKey, modelName } = request;
+
+    (async () => {
+      try {
+        console.log('[Background] 開始調用 Claude API');
+        
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true'
+          },
+          body: JSON.stringify({
+            model: modelName,
+            max_tokens: 4096,
+            system: systemPrompt,
+            messages: [
+              { role: 'user', content: userPrompt }
+            ]
+          })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(`Claude API 錯誤: ${response.status} - ${errorData.error?.message || response.statusText}`);
+        }
+
+        const data = await response.json();
+        const content = data.content?.[0]?.text;
+
+        if (!content) {
+          console.error('[Background] 回應中沒有 content，完整回應:', data);
+          throw new Error('Claude API 回應格式錯誤');
+        }
+
+        console.log('[Background] Claude API 調用成功');
+        sendResponse({
+          success: true,
+          content: content.trim()
+        });
+      } catch (error) {
+        console.error('[Background] Claude API 調用失敗:', error);
+        sendResponse({
+          success: false,
+          error: error.message
+        });
+      }
+    })();
+
+    return true;
+  }
+
+  // 處理 OpenAI API 調用（從 sidepanel 路由）
+  if (request.action === 'callOpenAIAPI') {
+    const { systemPrompt, userPrompt, apiKey, modelName } = request;
+
+    (async () => {
+      try {
+        console.log('[Background] 開始調用 OpenAI API');
+        
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: modelName,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt }
+            ],
+            max_completion_tokens: 4096
+          })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(`OpenAI API 錯誤: ${response.status} - ${errorData.error?.message || response.statusText}`);
+        }
+
+        const data = await response.json();
+        const content = data.choices?.[0]?.message?.content;
+
+        if (!content) {
+          console.error('[Background] 回應中沒有 content，完整回應:', data);
+          throw new Error('OpenAI API 回應格式錯誤');
+        }
+
+        console.log('[Background] OpenAI API 調用成功');
+        sendResponse({
+          success: true,
+          content: content.trim()
+        });
+      } catch (error) {
+        console.error('[Background] OpenAI API 調用失敗:', error);
+        sendResponse({
+          success: false,
+          error: error.message
+        });
+      }
+    })();
+
+    return true;
+  }
+
   return true;
 });
