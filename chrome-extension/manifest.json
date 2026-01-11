@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "小黃標-Threads User Profile Tag",
-  "version": "0.9.9",
+  "version": "0.9.10",
   "description": "將 Threads 用戶所在地等資訊，自動顯示在小黃標籤上。 Automatically extracts and reveals profile for quick identification.",
   "permissions": [
     "sidePanel",
@@ -12,7 +12,8 @@
   "host_permissions": [
    "*://www.threads.com/*",
    "https://api.anthropic.com/*",
-   "https://api.openai.com/*"
+   "https://api.openai.com/*",
+   "https://openrouter.ai/*"
   ],
   "background": {
     "service_worker": "background.js",

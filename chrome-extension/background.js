@@ -527,5 +527,61 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  // 處理 OpenRouter API 調用（從 sidepanel 路由）
+  if (request.action === 'callOpenRouterAPI') {
+    const { systemPrompt, userPrompt, apiKey, modelName } = request;
+
+    (async () => {
+      try {
+        console.log('[Background] 開始調用 OpenRouter API');
+        
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+            'HTTP-Referer': 'https://threads.com',
+            'X-Title': 'Threads User Profile Tag'
+          },
+          body: JSON.stringify({
+            model: modelName,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt }
+            ],
+            max_tokens: 4096
+          })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(`OpenRouter API 錯誤: ${response.status} - ${errorData.error?.message || response.statusText}`);
+        }
+
+        const data = await response.json();
+        const content = data.choices?.[0]?.message?.content;
+
+        if (!content) {
+          console.error('[Background] 回應中沒有 content，完整回應:', data);
+          throw new Error('OpenRouter API 回應格式錯誤');
+        }
+
+        console.log('[Background] OpenRouter API 調用成功');
+        sendResponse({
+          success: true,
+          content: content.trim()
+        });
+      } catch (error) {
+        console.error('[Background] OpenRouter API 調用失敗:', error);
+        sendResponse({
+          success: false,
+          error: error.message
+        });
+      }
+    })();
+
+    return true;
+  }
+
   return true;
 });

@@ -7,6 +7,7 @@
 // ==================== LLM 配置 ====================
 const OPENAI_MODEL_NAME = 'gpt-5-mini'; // OpenAI 模型名稱
 const CLAUDE_MODEL_NAME = 'claude-haiku-4-5-20251001'; // Claude 模型名稱
+const OPENROUTER_DEFAULT_MODEL = 'google/gemma-3-27b-it:free'; // OpenRouter 預設模型名稱
 
 /**
  * 從 chrome.storage 讀取是否使用本地 LLM
@@ -45,8 +46,32 @@ async function getClaudeApiKey() {
 }
 
 /**
+ * 從 chrome.storage 讀取 OpenRouter API Key
+ * @returns {Promise<string|null>}
+ */
+async function getOpenRouterApiKey() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['openrouterApiKey'], (result) => {
+      resolve(result.openrouterApiKey || null);
+    });
+  });
+}
+
+/**
+ * 從 chrome.storage 讀取 OpenRouter Model Name
+ * @returns {Promise<string>}
+ */
+async function getOpenRouterModelName() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['openrouterModelName'], (result) => {
+      resolve(result.openrouterModelName || OPENROUTER_DEFAULT_MODEL);
+    });
+  });
+}
+
+/**
  * 從 chrome.storage 讀取使用的 LLM Provider
- * @returns {Promise<string>} 'openai', 'claude', 或 'local'
+ * @returns {Promise<string>} 'openai', 'claude', 'openrouter', 或 'local'
  */
 async function getLLMProvider() {
   return new Promise((resolve) => {
@@ -250,6 +275,55 @@ async function callClaude(systemPrompt, userPrompt) {
   }
 }
 
+// ==================== OpenRouter API 呼叫 ====================
+
+/**
+ * 呼叫 OpenRouter API
+ * @param {string} systemPrompt - 系統提示詞
+ * @param {string} userPrompt - 用戶提示詞
+ * @returns {Promise<{success: boolean, content?: string, error?: string}>}
+ */
+async function callOpenRouter(systemPrompt, userPrompt) {
+  try {
+    const apiKey = await getOpenRouterApiKey();
+    const modelName = await getOpenRouterModelName();
+    
+    if (!apiKey) {
+      throw new Error('OpenRouter API Key 未設定，請在進階功能中設定');
+    }
+
+    if (!modelName) {
+      throw new Error('OpenRouter Model Name 未設定，請在進階功能中設定');
+    }
+
+    console.log(`[OpenRouter] 通過 background 調用 API (model: ${modelName})...`);
+    
+    // 通過 background service worker 調用 API
+    const response = await chrome.runtime.sendMessage({
+      action: 'callOpenRouterAPI',
+      systemPrompt: systemPrompt,
+      userPrompt: userPrompt,
+      apiKey: apiKey,
+      modelName: modelName
+    });
+
+    if (!response.success) {
+      throw new Error(response.error || 'OpenRouter API 調用失敗');
+    }
+
+    return {
+      success: true,
+      content: response.content
+    };
+  } catch (error) {
+    console.error('[OpenRouter] ❌ Error:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
 // ==================== Profile 分析 ====================
 
 /**
@@ -364,7 +438,7 @@ async function analyzeUserProfile(socialPostContent, socialReplyContent, targetU
         fullResponse += chunk;
       }
     } else {
-      // ==================== 使用遠端 API (OpenAI 或 Claude) ====================
+      // ==================== 使用遠端 API (OpenAI、Claude 或 OpenRouter) ====================
       const llmProvider = await getLLMProvider();
       
       if (llmProvider === 'claude') {
@@ -376,6 +450,16 @@ async function analyzeUserProfile(socialPostContent, socialReplyContent, targetU
         }
         
         fullResponse = claudeResult.content;
+      } else if (llmProvider === 'openrouter') {
+        const modelName = await getOpenRouterModelName();
+        console.log(`[OpenRouter] Calling OpenRouter API (model: ${modelName})...`);
+        const openRouterResult = await callOpenRouter(LLM_SYSTEM_PROMPT, userPromptFinal);
+        
+        if (!openRouterResult.success) {
+          throw new Error(openRouterResult.error);
+        }
+        
+        fullResponse = openRouterResult.content;
       } else {
         console.log('[OpenAI] Calling OpenAI API...');
         const openAIResult = await callOpenAI(LLM_SYSTEM_PROMPT, userPromptFinal);

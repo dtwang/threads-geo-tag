@@ -39,8 +39,17 @@ const llmProviderSection = document.getElementById('llmProviderSection');
 const llmProviderSelect = document.getElementById('llmProviderSelect');
 const openaiConfigPanel = document.getElementById('openaiConfigPanel');
 const claudeConfigPanel = document.getElementById('claudeConfigPanel');
+const openrouterConfigPanel = document.getElementById('openrouterConfigPanel');
 const localLLMConfigPanel = document.getElementById('localLLMConfigPanel');
 const localLLMStatus = document.getElementById('localLLMStatus');
+const openrouterApiKeyInput = document.getElementById('openrouterApiKeyInput');
+const openrouterApiKeyStatus = document.getElementById('openrouterApiKeyStatus');
+const openrouterApiKeySetIndicator = document.getElementById('openrouterApiKeySetIndicator');
+const openrouterApiKeyInputContainer = document.getElementById('openrouterApiKeyInputContainer');
+const editOpenrouterApiKeyBtn = document.getElementById('editOpenrouterApiKeyBtn');
+const clearOpenrouterApiKeyBtn = document.getElementById('clearOpenrouterApiKeyBtn');
+const openrouterModelInput = document.getElementById('openrouterModelInput');
+const openrouterModelStatus = document.getElementById('openrouterModelStatus');
 
 // ==================== 全局變數說明 ====================
 /**
@@ -838,6 +847,10 @@ chrome.storage.local.get(['keepTabAfterQuery', 'keepTabFilter', 'autoQueryMode',
   } else {
     // 預設為 smart 模式
     autoQueryModeSelect.value = 'smart';
+    // 保存預設值到 storage
+    chrome.storage.local.set({ autoQueryMode: 'smart' }, () => {
+      console.log('[Sidepanel] 初始化自動查詢模式預設值: smart');
+    });
   }
   
   // 根據自動查詢模式顯示/隱藏最大並行查詢數輸入框
@@ -943,16 +956,24 @@ function updateLLMProviderUI() {
   if (provider === 'local') {
     openaiConfigPanel.style.display = 'none';
     claudeConfigPanel.style.display = 'none';
+    openrouterConfigPanel.style.display = 'none';
     localLLMConfigPanel.style.display = 'block';
     // 檢查本地 LLM 可用性
     checkLocalLLMAvailability();
   } else if (provider === 'claude') {
     openaiConfigPanel.style.display = 'none';
     claudeConfigPanel.style.display = 'block';
+    openrouterConfigPanel.style.display = 'none';
+    localLLMConfigPanel.style.display = 'none';
+  } else if (provider === 'openrouter') {
+    openaiConfigPanel.style.display = 'none';
+    claudeConfigPanel.style.display = 'none';
+    openrouterConfigPanel.style.display = 'block';
     localLLMConfigPanel.style.display = 'none';
   } else {
     openaiConfigPanel.style.display = 'block';
     claudeConfigPanel.style.display = 'none';
+    openrouterConfigPanel.style.display = 'none';
     localLLMConfigPanel.style.display = 'none';
   }
 }
@@ -1016,7 +1037,11 @@ llmProviderSelect.addEventListener('change', () => {
     useLocalLLM: useLocalLLM,
     llmProvider: provider 
   }, () => {
-    console.log('[Sidepanel] 切換到', provider === 'local' ? '本地 LLM' : provider === 'claude' ? 'Claude API' : 'OpenAI API');
+    const providerName = provider === 'local' ? '本地 LLM' : 
+                         provider === 'claude' ? 'Claude API' : 
+                         provider === 'openrouter' ? 'OpenRouter API' : 
+                         'OpenAI API';
+    console.log('[Sidepanel] 切換到', providerName);
   });
   updateLLMProviderUI();
 });
@@ -1040,6 +1065,17 @@ function updateClaudeApiKeyDisplayState(hasApiKey) {
   } else {
     claudeApiKeySetIndicator.style.display = 'none';
     claudeApiKeyInputContainer.style.display = 'inline';
+  }
+}
+
+// 更新 OpenRouter API Key 顯示狀態（已設定時隱藏輸入框，顯示 edit 按鈕）
+function updateOpenrouterApiKeyDisplayState(hasApiKey) {
+  if (hasApiKey) {
+    openrouterApiKeySetIndicator.style.display = 'inline';
+    openrouterApiKeyInputContainer.style.display = 'none';
+  } else {
+    openrouterApiKeySetIndicator.style.display = 'none';
+    openrouterApiKeyInputContainer.style.display = 'inline';
   }
 }
 
@@ -1085,8 +1121,29 @@ clearClaudeApiKeyBtn.addEventListener('click', () => {
   updateClaudeApiKeyDisplayState(false);
 });
 
-// 初始化：從 chrome.storage 讀取 OpenAI API Key、Claude API Key 和 LLM Provider 設定
-chrome.storage.local.get(['openaiApiKey', 'claudeApiKey', 'useLocalLLM', 'llmProvider'], (result) => {
+// 監聽 edit OpenRouter API key 按鈕點擊
+editOpenrouterApiKeyBtn.addEventListener('click', () => {
+  openrouterApiKeySetIndicator.style.display = 'none';
+  openrouterApiKeyInputContainer.style.display = 'inline';
+  openrouterApiKeyInput.focus();
+});
+
+// 監聽 clear OpenRouter API key 按鈕點擊
+clearOpenrouterApiKeyBtn.addEventListener('click', () => {
+  openrouterApiKeyInput.value = '';
+  chrome.storage.local.remove('openrouterApiKey', () => {
+    console.log('[Sidepanel] 已清除 OpenRouter API Key');
+    openrouterApiKeyStatus.textContent = '已清除';
+    openrouterApiKeyStatus.className = 'api-key-status';
+    setTimeout(() => {
+      openrouterApiKeyStatus.textContent = '';
+    }, 2000);
+  });
+  updateOpenrouterApiKeyDisplayState(false);
+});
+
+// 初始化：從 chrome.storage 讀取 OpenAI API Key、Claude API Key、OpenRouter API Key 和 LLM Provider 設定
+chrome.storage.local.get(['openaiApiKey', 'claudeApiKey', 'openrouterApiKey', 'openrouterModelName', 'useLocalLLM', 'llmProvider'], (result) => {
   // OpenAI API Key
   if (result.openaiApiKey) {
     openaiApiKeyInput.value = result.openaiApiKey;
@@ -1103,6 +1160,21 @@ chrome.storage.local.get(['openaiApiKey', 'claudeApiKey', 'useLocalLLM', 'llmPro
     updateClaudeApiKeyDisplayState(true);
   } else {
     updateClaudeApiKeyDisplayState(false);
+  }
+  
+  // OpenRouter API Key
+  if (result.openrouterApiKey) {
+    openrouterApiKeyInput.value = result.openrouterApiKey;
+    console.log('[Sidepanel] 載入 OpenRouter API Key');
+    updateOpenrouterApiKeyDisplayState(true);
+  } else {
+    updateOpenrouterApiKeyDisplayState(false);
+  }
+  
+  // OpenRouter Model Name
+  if (result.openrouterModelName) {
+    openrouterModelInput.value = result.openrouterModelName;
+    console.log('[Sidepanel] 載入 OpenRouter Model Name:', result.openrouterModelName);
   }
   
   // 設定 LLM Provider 選擇
@@ -1194,6 +1266,87 @@ claudeApiKeyInput.addEventListener('input', () => {
       setTimeout(() => {
         claudeApiKeyStatus.textContent = '';
         updateClaudeApiKeyDisplayState(true);
+      }, 2000);
+    });
+  }, 500);
+});
+
+// 當 OpenRouter API Key 輸入框內容變化時，自動儲存
+let openrouterApiKeySaveTimeout = null;
+openrouterApiKeyInput.addEventListener('input', () => {
+  const apiKey = openrouterApiKeyInput.value.trim();
+  
+  // 清除之前的延遲儲存
+  if (openrouterApiKeySaveTimeout) {
+    clearTimeout(openrouterApiKeySaveTimeout);
+  }
+  
+  // 延遲 500ms 後自動儲存
+  openrouterApiKeySaveTimeout = setTimeout(() => {
+    if (!apiKey) {
+      openrouterApiKeyStatus.textContent = '';
+      openrouterApiKeyStatus.className = 'api-key-status';
+      return;
+    }
+    
+    // 簡單驗證 OpenRouter API Key 格式
+    if (!apiKey.startsWith('sk-or-')) {
+      openrouterApiKeyStatus.textContent = '格式不正確';
+      openrouterApiKeyStatus.className = 'api-key-status error';
+      return;
+    }
+    
+    chrome.storage.local.set({ openrouterApiKey: apiKey }, () => {
+      console.log('[Sidepanel] 自動儲存 OpenRouter API Key');
+      openrouterApiKeyStatus.textContent = '✓ 已儲存';
+      openrouterApiKeyStatus.className = 'api-key-status saved';
+      
+      // 2 秒後清除狀態訊息並切換到已設定狀態
+      setTimeout(() => {
+        openrouterApiKeyStatus.textContent = '';
+        updateOpenrouterApiKeyDisplayState(true);
+      }, 2000);
+    });
+  }, 500);
+});
+
+// 當 OpenRouter Model Name 輸入框內容變化時，自動儲存
+let openrouterModelSaveTimeout = null;
+const DEFAULT_OPENROUTER_MODEL = 'google/gemma-3-27b-it:free';
+
+openrouterModelInput.addEventListener('input', () => {
+  const modelName = openrouterModelInput.value.trim();
+  
+  // 清除之前的延遲儲存
+  if (openrouterModelSaveTimeout) {
+    clearTimeout(openrouterModelSaveTimeout);
+  }
+  
+  // 延遲 500ms 後自動儲存
+  openrouterModelSaveTimeout = setTimeout(() => {
+    // 如果為空白，儲存空字串（實際使用時會使用預設模型）
+    if (!modelName) {
+      chrome.storage.local.set({ openrouterModelName: '' }, () => {
+        console.log('[Sidepanel] OpenRouter Model Name 已清空（實際使用時將使用預設模型）');
+        openrouterModelStatus.textContent = '✓ 已儲存';
+        openrouterModelStatus.className = 'api-key-status saved';
+        
+        // 2 秒後清除狀態訊息
+        setTimeout(() => {
+          openrouterModelStatus.textContent = '';
+        }, 2000);
+      });
+      return;
+    }
+    
+    chrome.storage.local.set({ openrouterModelName: modelName }, () => {
+      console.log('[Sidepanel] 自動儲存 OpenRouter Model Name:', modelName);
+      openrouterModelStatus.textContent = '✓ 已儲存';
+      openrouterModelStatus.className = 'api-key-status saved';
+      
+      // 2 秒後清除狀態訊息
+      setTimeout(() => {
+        openrouterModelStatus.textContent = '';
       }, 2000);
     });
   }, 500);

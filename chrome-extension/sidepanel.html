@@ -8,7 +8,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>小黃標- Threads用戶資訊標籤 v0.9.9</h1>
+    <h1>小黃標- Threads用戶資訊標籤 v0.9.10</h1>
 
     <div class="welcome-section">
       <ol class="instructions">
@@ -58,6 +58,7 @@
               <select id="llmProviderSelect" name="llmProvider">
                 <option value="openai">gpt-5-mini (遠端API)</option>
                 <option value="claude">claude-haiku-4.5 (遠端API)</option>
+                <option value="openrouter">OpenRouter (遠端API)</option>
                 <option value="local">gemini-3-nano (本機)</option>
               </select>
             </div>
@@ -87,6 +88,25 @@
                   <button type="button" id="clearClaudeApiKeyBtn" class="small-text-btn">[clear]</button>
                 </span>
                 <span id="claudeApiKeyStatus" class="api-key-status"></span>
+              </div>
+            </div>
+            <div class="llm-config-panel" id="openrouterConfigPanel" style="display: none;">
+              <div class="config-row">
+                <label for="openrouterApiKeyInput">OpenRouter API Key：</label>
+                <span id="openrouterApiKeySetIndicator" style="display: none;">
+                  <span class="api-key-set-text">已設定</span>
+                  <button type="button" id="editOpenrouterApiKeyBtn" class="small-text-btn">[edit]</button>
+                </span>
+                <span id="openrouterApiKeyInputContainer">
+                  <input type="password" id="openrouterApiKeyInput" placeholder="sk-or-v1-..." style="width: 160px;">
+                  <button type="button" id="clearOpenrouterApiKeyBtn" class="small-text-btn">[clear]</button>
+                </span>
+                <span id="openrouterApiKeyStatus" class="api-key-status"></span>
+              </div>
+              <div class="config-row">
+                <label for="openrouterModelInput">Model</label>
+                <input type="text" id="openrouterModelInput" placeholder="google/gemma-3-27b-it:free" style="width: 280px;">
+                <span id="openrouterModelStatus" class="api-key-status"></span>
               </div>
             </div>
             <div class="llm-config-panel" id="localLLMConfigPanel" style="display: none;">
