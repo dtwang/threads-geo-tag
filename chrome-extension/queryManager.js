@@ -1462,11 +1462,32 @@ function updateMaxConcurrent(value) {
   }
 }
 
+/**
+ * 清空查詢隊列（當側邊欄關閉時調用）
+ * @returns {Object} 清理結果 { clearedCount: number }
+ */
+function clearQueryQueue() {
+  const clearedCount = queryQueue.length;
+  
+  // 通知所有待處理的任務被取消
+  queryQueue.forEach(task => {
+    task.reject(new Error('側邊欄已關閉，查詢已取消'));
+  });
+  
+  // 清空隊列
+  queryQueue = [];
+  
+  console.log(`[QueryManager] 已清空查詢隊列，取消 ${clearedCount} 個待處理任務`);
+  
+  return { clearedCount };
+}
+
 // ==================== 導出 ====================
 export {
   QUERY_STATUS,
   queryUserRegion,
   getQueueStatus,
+  clearQueryQueue,
   getCachedRegion,
   getAllCachedRegions,
   saveCachedRegion,

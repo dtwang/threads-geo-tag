@@ -8,58 +8,95 @@
 </head>
 <body>
   <div class="container">
-    <h1>小黃標- Threads用戶資訊標籤 v0.9.10</h1>
+
+    <div class="carousel-section">
+      <div class="carousel-container">
+        <div class="carousel-track">
+          <img src="img/guide01.webp" alt="使用指南 1" class="carousel-image active">
+          <img src="img/guide02.webp" alt="使用指南 2" class="carousel-image">
+          <img src="img/guide03.webp" alt="使用指南 3" class="carousel-image">
+          <img src="img/guide04.webp" alt="使用指南 4" class="carousel-image">
+          <img src="img/guide05.webp" alt="使用指南 5" class="carousel-image">
+          <img src="img/guide06.webp" alt="使用指南 6" class="carousel-image">
+        </div>
+        <button class="carousel-btn carousel-btn-prev" id="carouselPrev">‹</button>
+        <button class="carousel-btn carousel-btn-next" id="carouselNext">›</button>
+      </div>
+      <div class="carousel-indicators" style="display: none">
+        <span class="carousel-indicator active" data-index="0"></span>
+        <span class="carousel-indicator" data-index="1"></span>
+        <span class="carousel-indicator" data-index="2"></span>
+        <span class="carousel-indicator" data-index="3"></span>
+        <span class="carousel-indicator" data-index="4"></span>
+        <span class="carousel-indicator" data-index="5"></span>
+      </div>
+      <div class="carousel-credit">
+        <span>圖卡 Credit </span>
+        <a href="https://www.threads.com/@chibc_" target="_blank" rel="noopener noreferrer" class="credit-link">
+          <span class="credit-icon">@</span>
+          <span class="credit-name">暗月之鏡 chibc_</span>
+        </a>
+      </div>
+    </div>
 
     <div class="welcome-section">
-      <ol class="instructions">
-      	<li>開啟此工具面板後，會自動在每位用戶名稱旁加入<span class="location-tag">用戶資訊標籤</span>。點擊[查詢]會自動開啟新分頁做分析。</li>
-        <li>若不需要此功能，只要關閉側邊欄，即可同時移除頁面上所有標籤。</li> 
-      <li>
-        進階功能中提供「社群行為分析（實驗性功能）」選項。
-        啟用後，系統會用AI分析用戶近期的貼文與回覆內容，
-        在頁面上顯示行為重點標註，幫助快速了解互動風格。
-        此功能預設為關閉，需手動開啟。
-      </li>
-    </ol>
+      <p class="welcome-intro"><strong>小黃標</strong>｜分析公開資料，守護真實對話</p>
+      <p class="welcome-desc">快速查詢 Threads 用戶所在地，AI 分析發言紀錄評估帳號可信度。針對情緒攻擊、詐騙或仇恨內容，自動降低顯示優先度。</p>
+      <p class="welcome-tip">開啟此面板顯示<span class="location-tag">標籤</span>，按 <svg class="sidepanel-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="2" width="14" height="12" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="11" y1="2" x2="11" y2="14" stroke="currentColor" stroke-width="1.5"/><polygon points="4,5 4,11 7,8" fill="currentColor"/></svg> 關閉即隱藏。</p>
     </div>
 
     <div id="statusBar" class="status-bar">就緒</div>
 
+    <div class="cache-stats-display">
+      <div class="cache-stats-info">
+        <div class="cache-stat-item">
+          <span class="cache-stat-label">所在地</span>
+          <strong id="cacheCount" class="cache-count-clickable" title="點擊刷新統計">0</strong>
+        </div>
+        <div class="cache-stat-item">
+          <span class="cache-stat-label">用戶側寫</span>
+          <strong id="profileCacheCount" class="cache-count-clickable" title="點擊刷新統計">0</strong>
+        </div>
+        <div class="cache-stat-item">
+          <span class="cache-stat-label">手動標注</span>
+          <strong id="trustListCount" class="cache-count-clickable" title="點擊刷新統計">0</strong>
+        </div>
+      </div>
+      <div class="cache-action-buttons">
+        <button id="clearAllCacheBtn" class="clear-cache-btn" title="清除所有本機保存的快取資料">清除</button>
+        <button id="exportCacheBtn" class="export-cache-btn" title="匯出快取資料">匯出</button>
+      </div>
+    </div>
+
     <details class="advanced-section" id="advancedSection">
-      <summary class="advanced-toggle">進階功能...</summary>
+      <summary class="advanced-toggle">進階設定...</summary>
       <div class="advanced-content">
         <div class="control-group">
-          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
-            <label for="autoQueryModeSelect" style="margin: 0; font-weight: 500;">自動查詢：</label>
-            <select id="autoQueryModeSelect" name="autoQueryMode" style="flex: 1; max-width: 250px;">
-              <option value="off">關閉</option>
-              <option value="smart">智慧自動查詢</option>
-              <option value="visible">顯示時自動查詢</option>
-            </select>
-          </div>
-          <p class="option-description" id="autoQueryModeDescription">僅作手動查詢</p>
+          <label class="checkbox-container">
+            <input type="checkbox" id="autoQueryModeCheckbox">
+            <span class="checkbox-label">智慧自動查詢</span>
+          </label>
+          <p class="option-description">預先針對高互動陌生帳號自動做查詢</p>
           <div class="sub-option" id="maxConcurrentContainer" style="display: none;">
             <label for="maxConcurrentInput">同時最多查詢分頁數量：</label>
             <input type="number" id="maxConcurrentInput" min="1" max="10" value="3" style="width: 60px;">
           </div>
         </div>
 
-        <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-
         <div class="control-group">
           <label class="checkbox-container">
             <input type="checkbox" id="llmProfileAnalysisCheckbox">
-            <span class="checkbox-label">社群行為分析(實驗性功能)</span>
+            <span class="checkbox-label">帳號行為分析</span>
           </label>
           <p class="option-description">根據用戶近期的貼文與回覆內容，使用AI產生行為側寫標籤。</p>
           <div class="llm-provider-section" id="llmProviderSection" style="display: none;">
             <div class="llm-provider-options">
               <label for="llmProviderSelect">模型：</label>
               <select id="llmProviderSelect" name="llmProvider">
-                <option value="openai">gpt-5-mini (遠端API)</option>
-                <option value="claude">claude-haiku-4.5 (遠端API)</option>
-                <option value="openrouter">OpenRouter (遠端API)</option>
-                <option value="local">gemini-3-nano (本機)</option>
+                <option value="local">🆓 本機 Gemini-3-nano</option>
+                <option value="openrouter">🆓💰 雲端 OpenRouter</option>
+                <option value="openai">💰 雲端 gpt-5-mini</option>
+                <option value="claude">💰 雲端 claude-haiku-4.5</option>
               </select>
             </div>
             <div class="llm-config-panel" id="openaiConfigPanel">
@@ -105,7 +142,7 @@
               </div>
               <div class="config-row">
                 <label for="openrouterModelInput">Model</label>
-                <input type="text" id="openrouterModelInput" placeholder="google/gemma-3-27b-it:free" style="width: 280px;">
+                <input type="text" id="openrouterModelInput" placeholder="openrouter/free" style="width: 280px;">
                 <span id="openrouterModelStatus" class="api-key-status"></span>
               </div>
             </div>
@@ -136,24 +173,6 @@
         </div>
          -->
 
-        <div class="cache-stats-display">
-          <span id="cacheStatsLabel">已儲存用戶所在地: <strong id="cacheCount" class="cache-count-clickable" title="點擊刷新統計">0</strong></span>
-          <button id="showCacheBtn" class="show-cache-btn" title="顯示所有本機保存的用戶所在地資料">顯示</button>
-          <button id="clearCacheBtn" class="clear-cache-btn" title="清除所有本機保存的用戶所在地資料">清除</button>
-        </div>
-
-        <div class="cache-stats-display">
-          <span id="profileCacheStatsLabel">已儲存用戶側寫: <strong id="profileCacheCount" class="cache-count-clickable" title="點擊刷新統計">0</strong></span>
-          <button id="showProfileCacheBtn" class="show-cache-btn" title="顯示所有本機保存的用戶側寫資料">顯示</button>
-          <button id="clearProfileCacheBtn" class="clear-cache-btn" title="清除所有本機保存的用戶側寫資料">清除</button>
-        </div>
-
-        <div class="cache-stats-display">
-          <span id="trustListStatsLabel">已儲存手動信任清單: <strong id="trustListCount" class="cache-count-clickable" title="點擊刷新統計">0</strong></span>
-          <button id="showTrustListBtn" class="show-cache-btn" title="顯示所有手動信任的用戶">顯示</button>
-          <button id="clearTrustListBtn" class="clear-cache-btn" title="清除所有手動信任的用戶">清除</button>
-        </div>
-
         <div class="content-group">
           <label for="contentOutput">查詢結果:</label>
           <textarea id="contentOutput" rows="5" readonly placeholder="查詢結果將顯示在這裡..."></textarea>
@@ -161,6 +180,7 @@
       </div>
     </details>
 
+    <div class="version-info">v0.9.11</div>
 
   </div>
 

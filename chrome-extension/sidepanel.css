@@ -41,27 +41,164 @@ h1 {
   margin-bottom: 12px;
 }
 
-.welcome-section h2 {
-  font-size: 14px;
-  color: #2563eb;
-  margin-bottom: 10px;
+.carousel-section {
+  margin-bottom: 12px;
+}
+
+.carousel-container {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 6px;
+  aspect-ratio: 1080 / 1293;
+}
+
+.carousel-track {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  transition: transform 0.4s ease-in-out;
+}
+
+.carousel-image {
+  min-width: 100%;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.carousel-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+  width: 24px;
+  height: 24px;
+  background-color: rgba(66, 133, 244, 0.8);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s, transform 0.1s;
+  line-height: 1;
+  padding: 0;
+}
+
+.carousel-btn-prev {
+  left: 4px;
+}
+
+.carousel-btn-next {
+  right: 4px;
+}
+
+.carousel-btn:hover {
+  background-color: rgba(51, 103, 214, 0.9);
+  transform: translateY(-50%) scale(1.1);
+}
+
+.carousel-btn:active {
+  background-color: rgba(40, 81, 163, 0.9);
+  transform: translateY(-50%) scale(0.95);
+}
+
+.carousel-indicators {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.carousel-indicator {
+  width: 8px;
+  height: 8px;
+  background-color: #cbd5e1;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background-color 0.2s, transform 0.2s;
+}
+
+.carousel-indicator:hover {
+  background-color: #94a3b8;
+  transform: scale(1.2);
+}
+
+.carousel-indicator.active {
+  background-color: #4285f4;
+  transform: scale(1.3);
+}
+
+.carousel-credit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.credit-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #4285f4;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.credit-link:hover {
+  color: #3367d6;
+  text-decoration: underline;
+}
+
+.credit-icon {
+  font-weight: bold;
+  font-size: 12px;
+}
+
+.credit-name {
+  font-weight: 500;
+}
+
+.welcome-intro {
+  font-size: 13px;
+  color: #1e293b;
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.welcome-intro strong {
+  color: #f59e0b;
   font-weight: 700;
 }
 
-.instructions {
-  margin-left: 20px;
-  color: #374151;
-  font-size: 13px;
-  line-height: 1.7;
+.welcome-desc {
+  font-size: 11px;
+  color: #475569;
+  line-height: 1.6;
+  margin-bottom: 6px;
 }
 
-.instructions li {
-  margin-bottom: 8px;
+.welcome-tip {
+  font-size: 11px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
-.instructions strong {
-  color: #2196F3;
-  font-weight: 600;
+.sidepanel-icon {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0 2px;
+  color: #64748b;
 }
 
 .control-group {
@@ -456,36 +593,80 @@ label {
   border-color: #4285f4;
 }
 
-/* 緩存統計顯示區域 */
+/* 緩存統計顯示區域 - 專業多欄佈局 */
 .cache-stats-display {
-  margin: 8px 0;
-  padding: 6px;
-  background-color: #e8f5e9;
-  border-radius: 3px;
-  text-align: center;
-  font-size: 11px;
-  color: #555;
+  margin: 10px 0;
+  padding: 8px 10px;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e8f4fd 100%);
+  border: 1px solid #d0e3f0;
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 16px;
+  align-items: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.cache-stats-info {
   display: flex;
+  gap: 20px;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  flex-wrap: wrap;
+}
+
+.cache-stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.cache-stat-label {
+  font-size: 10px;
+  color: #64748b;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .cache-stats-display strong {
-  color: #2e7d32;
+  color: #2563eb;
   font-size: 12px;
+  font-weight: 700;
+  display: block;
+  min-width: 32px;
+  text-align: center;
 }
 
 .cache-count-clickable {
   cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 3px;
-  transition: background-color 0.2s;
+  padding: 6px 10px;
+  border-radius: 6px;
+  transition: all 0.2s;
+  background-color: rgba(37, 99, 235, 0.08);
 }
 
 .cache-count-clickable:hover {
-  background-color: #c8e6c9;
+  background-color: rgba(37, 99, 235, 0.15);
+  transform: scale(1.08);
+}
+
+.cache-count-clickable:active {
+  transform: scale(0.95);
+}
+
+/* 按鈕組容器 */
+.cache-action-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.cache-stats-display > button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .show-cache-btn {
@@ -518,31 +699,70 @@ label {
 }
 
 .clear-cache-btn {
-  padding: 3px 8px;
-  background-color: #f44336;
-  color: white;
-  border: none;
-  border-radius: 3px;
+  padding: 5px 12px;
+  background-color: #e2e8f0;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
   font-size: 10px;
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: all 0.2s;
   line-height: 1.4;
+  white-space: nowrap;
 }
 
 .clear-cache-btn:hover {
-  background-color: #d32f2f;
+  background-color: #cbd5e1;
+  border-color: #94a3b8;
+  color: #334155;
 }
 
 .clear-cache-btn:active {
-  background-color: #b71c1c;
+  background-color: #b0bec5;
   transform: scale(0.98);
 }
 
 .clear-cache-btn:disabled {
-  background-color: #ccc;
+  background-color: #f1f5f9;
+  color: #94a3b8;
   cursor: not-allowed;
   transform: none;
+  border-color: #e2e8f0;
+}
+
+.export-cache-btn {
+  padding: 5px 12px;
+  background-color: #10b981;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  line-height: 1.4;
+  box-shadow: 0 1px 3px rgba(16, 185, 129, 0.3);
+  white-space: nowrap;
+}
+
+.export-cache-btn:hover {
+  background-color: #059669;
+  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.4);
+  transform: translateY(-1px);
+}
+
+.export-cache-btn:active {
+  background-color: #047857;
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(16, 185, 129, 0.3);
+}
+
+.export-cache-btn:disabled {
+  background-color: #cbd5e1;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 /* 所在地標籤樣式（帶左側三角形） */
@@ -749,4 +969,12 @@ label {
   color: #34a853;
   font-size: 11px;
   font-weight: 500;
+}
+
+.version-info {
+  text-align: center;
+  font-size: 10px;
+  color: #94a3b8;
+  margin-top: 12px;
+  padding: 4px 0;
 }

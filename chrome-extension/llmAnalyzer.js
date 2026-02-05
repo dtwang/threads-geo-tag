@@ -7,7 +7,7 @@
 // ==================== LLM 配置 ====================
 const OPENAI_MODEL_NAME = 'gpt-5-mini'; // OpenAI 模型名稱
 const CLAUDE_MODEL_NAME = 'claude-haiku-4-5-20251001'; // Claude 模型名稱
-const OPENROUTER_DEFAULT_MODEL = 'google/gemma-3-27b-it:free'; // OpenRouter 預設模型名稱
+const OPENROUTER_DEFAULT_MODEL = 'openrouter/free'; // OpenRouter 預設模型名稱
 
 /**
  * 從 chrome.storage 讀取是否使用本地 LLM
@@ -83,8 +83,8 @@ async function getLLMProvider() {
 
 const LLM_SYSTEM_PROMPT = '你是一個內容風險與風格標註器。請嚴格依照使用者規則輸出，且只輸出 YAML（不得有任何前綴、說明或 Markdown）。只使用繁體中文。';
 const UF_KEYWORD="憨鳥,萊爾賴,萊爾校長,綠共,青鳥真是腦殘,賴皮寮,氫鳥,賴清德戒嚴,賴清德獨裁,賴喪,冥禁黨,賴功德,萊爾,萊爾校長"
-const TAG_SAMPLE="生活帳,生活日常,情緒宣洩,憤世抱怨,攻擊發言,酸言酸語,政治帳,立場鮮明,易怒,惡意嘲諷,謾罵,人身攻擊,溫暖陪伴,真誠分享,情感支持,理性討論,仇恨言論,觀點交流,社會關懷,同理傾聽,個人成長, 詐騙風險, 刻意引戰; 相反的屬性：(生活帳 vs 政治帳) , (攻擊發言, 仇恨言論, 易怒,謾罵,情緒宣洩,刻意引戰,憤世抱怨 vs 理性討論,觀點交流) , (人身攻擊,惡意嘲諷,易怒,謾罵,情緒宣洩,刻意引戰,憤世抱怨 vs 溫暖陪伴, 真誠分享,情感支持,同理傾聽,個人成長) 等，需擇一不能同時出現。\n分享自身被詐騙經驗，提醒他人避免受騙，要使用「詐騙提醒」tag而非「詐騙風險」";
-const ORDER_FIRST_TAGS="詐騙風險,統戰言論,人身攻擊,仇恨言論"
+const TAG_SAMPLE="生活帳,生活日常,情緒宣洩,憤世抱怨,攻擊發言,酸言酸語,政治帳,立場鮮明,易怒,惡意嘲諷,謾罵,人身攻擊,溫暖陪伴,真誠分享,情感支持,理性討論,仇恨言論,觀點交流,社會關懷,同理傾聽,個人成長, 詐騙風險, 刻意引戰; 相反的屬性：(生活帳 vs 政治帳) , (攻擊發言, 仇恨言論, 易怒,槓精,謾罵,情緒宣洩,刻意引戰,憤世抱怨 vs 理性討論,觀點交流) , (人身攻擊,惡意嘲諷,易怒,槓精,謾罵,情緒宣洩,刻意引戰,憤世抱怨 vs 溫暖陪伴, 真誠分享,情感支持,同理傾聽,個人成長) 等，需擇一不能同時出現。\n分享自身被詐騙經驗，提醒他人避免受騙，要使用「詐騙提醒」tag而非「詐騙風險」";
+const ORDER_FIRST_TAGS="槓精,詐騙風險,統戰言論,人身攻擊,仇恨言論"
 /**
  * 解析 YAML 格式的標籤列表
  * @param {string} yamlStr - YAML 格式字串
@@ -378,10 +378,11 @@ async function analyzeUserProfile(socialPostContent, socialReplyContent, targetU
   const useLocalLLM = await getUseLocalLLM();
 
   const userPromptAPILLm="特殊標註規則：\n- 若有使用到中國統戰意味的用語（例如："+UF_KEYWORD+" 等），或宣傳／呼應中國併吞台灣正當性論述，或削弱台灣民主與國家意識（例如：政府獨裁、中國強大台灣弱小、花那麼多國防經費是美國一直從台灣搬錢走），請一定標註標籤：統戰言論。\n" +
-                          "- 若作者回覆他人時出現如「哥哥可以加我的賴聊天嗎」，提供私人帳號或連結引流或誘導行為，像是 t.me 是 telegram的群組連結全部都是色情釣魚詐騙帳號，請標註：詐騙風險。\n\n";
+                          "- 若作者回覆他人時出現如「哥哥可以加我的賴聊天嗎」，提供私人帳號或連結引流或誘導行為，像是 t.me 是 telegram的群組連結全部都是色情釣魚詐騙帳號，請標註：詐騙風險。\n"+
+                          "- 判斷該留言是否屬於「槓精」：若發言多次以反駁、否定或抬槓為主要目的，且未促進理解或建設性討論；同時具有超過兩個以上的人身攻擊、謾罵、刻意引戰、攻擊性發言或惡意嘲諷的情況，才能標註為槓精\n";
 
   // 本機所使用的 Nano-LLM , 移除受限於模型能力較弱會造成誤判的規則
-   const userPromptLocalLLm="不要使用刻意引戰標籤";
+   const userPromptLocalLLm="不要使用 槓精,刻意引戰 這兩個標籤";
 
     const userPromptFinal = '請參考以下所提供的' + socialPostTypeString + 
       ', 依內容數量排序, 提供最多五個不重複的最貼切描述該用戶社群帳號("'+targetUser+'")展現出的風格的標籤 (舉例但不限這些: '+TAG_SAMPLE+'..). \n'+ ( useLocalLLM ? userPromptLocalLLm : userPromptAPILLm) + '\n' + 

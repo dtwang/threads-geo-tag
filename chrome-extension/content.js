@@ -42,6 +42,9 @@
  */
 let currentUserElementsData = [];
 
+// 寬度模式：full_width_mode (預設), half_width_mode, mini_width_mode
+let widthMode = null;
+
 // 常見的國家/區域清單（可以根據需要擴充）
 const REGIONS_DATA = [
   // 亞洲
@@ -49,6 +52,7 @@ const REGIONS_DATA = [
   { "en": "China", "zh_tw": "中國", "emoji": "🇨🇳" },
   { "en": "Japan", "zh_tw": "日本", "emoji": "🇯🇵" },
   { "en": "Korea", "zh_tw": "韓國", "emoji": "🇰🇷" },
+  { "en": "South Korea", "zh_tw": "南韓", "emoji": "🇰🇷" },
   { "en": "Hong Kong", "zh_tw": "香港", "emoji": "🇭🇰" },
   { "en": "Singapore", "zh_tw": "新加坡", "emoji": "🇸🇬" },
   { "en": "Malaysia", "zh_tw": "馬來西亞", "emoji": "🇲🇾" },
@@ -119,6 +123,75 @@ function getGrayLabelBgColor() {
  */
 function getGrayTextColor() {
   return isPageInDarkMode() ? GRAY_TEXT_COLOR_DARK_MODE : GRAY_TEXT_COLOR;
+}
+
+/**
+ * 偵測頁面的寬度模式（根據其他 extension 的存在）
+ * 只在頁面載入後執行一次
+ * @returns {string} 'full_width_mode' | 'half_width_mode' | 'mini_width_mode'
+ */
+function detectWidthMode() {
+  // 如果已經偵測過，直接返回
+  if (widthMode !== null) {
+    return widthMode;
+  }
+
+  const hasQuickReport = document.querySelector('.threads-quick-report-container') !== null;
+  const hasFetchBtn = document.querySelector('.threads-fetch-btn') !== null;
+  const hasProfileBadge = document.querySelector('.threads-profile-info-badge') !== null;
+  const hasLeeSuThreads = hasFetchBtn || hasProfileBadge;
+
+  if (hasQuickReport && hasLeeSuThreads) {
+    // 有 threads-quick-report 和 Lee-Su-Threads extension
+    widthMode = 'mini_width_mode';
+    console.log('[Threads] 偵測到寬度模式: mini_width_mode (有 Quick Report + Lee-Su-Threads)');
+  } else if (hasQuickReport || hasLeeSuThreads) {
+    // 只有 threads-quick-report extension 或只有 Lee-Su-Threads extension
+    widthMode = 'half_width_mode';
+    console.log('[Threads] 偵測到寬度模式: half_width_mode (只有 Quick Report 或 Lee-Su-Threads)');
+  } else {
+    // 都沒有
+    widthMode = 'full_width_mode';
+    console.log('[Threads] 偵測到寬度模式: full_width_mode (預設)');
+  }
+
+  return widthMode;
+}
+
+/**
+ * 根據寬度模式獲取標籤容器的樣式
+ * @returns {object} 包含 maxWidth 和 overflow 的樣式物件
+ */
+function getWidthModeStyles() {
+  const mode = detectWidthMode();
+  
+  switch (mode) {
+    case 'mini_width_mode':
+      return {
+        labelMaxWidth: '120px',
+        containerMaxWidth: '100px',
+        containerOverflow: 'hidden',
+        containerTextOverflow: 'ellipsis',
+        containerWhiteSpace: 'nowrap'
+      };
+    case 'half_width_mode':
+      return {
+        labelMaxWidth: '220px',
+        containerMaxWidth: '150px',
+        containerOverflow: 'hidden',
+        containerTextOverflow: 'ellipsis',
+        containerWhiteSpace: 'nowrap'
+      };
+    case 'full_width_mode':
+    default:
+      return {
+        labelMaxWidth: 'none',
+        containerMaxWidth: 'none',
+        containerOverflow: 'visible',
+        containerTextOverflow: 'clip',
+        containerWhiteSpace: 'nowrap'
+      };
+  }
 }
 
 // 监听来自 sidepanel 的消息
@@ -919,11 +992,17 @@ function getNextSpanText(element) {
  */
 function checkFor429Error(account) {
   try {
+    // 移除 @ 符號（如果有的話）
+    const username = account ? (account.startsWith('@') ? account.slice(1) : account) : '';
+    
     // 檢查頁面標題
     const pageTitle = document.title || '';
     console.log(`[Threads] 檢查 429 錯誤 - 頁面標題: "${pageTitle}"`);
     
-    if (pageTitle.includes('429') || pageTitle.toLowerCase().includes('too many requests')) {
+    // 將頁面標題中的用戶名稱移除後再檢查 429，避免用戶名稱中包含 429 造成誤判
+    const titleWithoutUsername = username ? pageTitle.replace(username, '') : pageTitle;
+    
+    if (titleWithoutUsername.includes('429') || pageTitle.toLowerCase().includes('too many requests')) {
       console.log('[Threads] 在頁面標題中偵測到 429 錯誤');
       return true;
     }
@@ -945,9 +1024,6 @@ function checkFor429Error(account) {
       /這個網頁無法正常運作/i      // Chrome 中文錯誤頁面
     ];
 
-    // 移除 @ 符號（如果有的話）
-    const username = account ? (account.startsWith('@') ? account.slice(1) : account) : '';
-    
     // only check content if pageTitle does not contain user account name
     if (!pageTitle.includes(username)) {
     
@@ -994,7 +1070,7 @@ function waitForMilliseconds(ms) {
 // 顏色判斷條件常數（方便未來調整）
 const RED_FLAG_LOCATION = 'China';
 const RED_FLAG_PROFILE_TAGS = [ '仇恨言論','統戰言論'];
-const GRAY_FLAG_PROFILE_TAGS = [ '易怒','謾罵','人身攻擊','詐騙風險','統戰言論','仇恨言論','刻意引戰','攻擊發言','惡意嘲諷'];
+const GRAY_FLAG_PROFILE_TAGS = [ '槓精','詐騙風險','統戰言論','仇恨言論','攻擊發言','刻意引戰'];
 const GRAY_FLAG_LOCATION = ['China',  'India','Bangladesh','Afghanistan','Uzbekistan','Tunisia','Kenya','Brazil','Bulgaria','Saudi Arabia','Libya','Nigeria','Czech Republic','Colombia','Cambodia','Russia','Pakistan','Laos','Chile']; // 灰色標籤的地點
 const GREEN_FLAG_LOCATION = 'Taiwan';
 const NOT_USE_RED_FLAG = true; // 由於本機模型能力有限，暫時不使用紅色標籤
@@ -1036,6 +1112,14 @@ function addToManualTrustList(account) {
       list.push(account);
       localStorage.setItem(MANUAL_TRUST_LIST_KEY, JSON.stringify(list));
       console.log(`[Threads] 已將 ${account} 加入手動信任清單`);
+      
+      // 通知 sidepanel 更新手動標注統計
+      chrome.runtime.sendMessage({
+        action: 'trustListChanged'
+      }).catch(err => {
+        console.log('[Threads] 通知 sidepanel 更新手動標注統計失敗:', err.message);
+      });
+      
       return true;
     }
     return false;
@@ -1058,6 +1142,14 @@ function removeFromManualTrustList(account) {
       list.splice(index, 1);
       localStorage.setItem(MANUAL_TRUST_LIST_KEY, JSON.stringify(list));
       console.log(`[Threads] 已將 ${account} 從手動信任清單移除`);
+      
+      // 通知 sidepanel 更新手動標注統計
+      chrome.runtime.sendMessage({
+        action: 'trustListChanged'
+      }).catch(err => {
+        console.log('[Threads] 通知 sidepanel 更新手動標注統計失敗:', err.message);
+      });
+      
       return true;
     }
     return false;
@@ -1338,14 +1430,32 @@ function parseTagsWithReasons(profile) {
 function createClickableTagsElement(tagsWithReasons) {
   const container = document.createElement('span');
   container.className = 'threads-tags-container';
-  container.style.cssText = 'display: inline; position: relative;';
+  
+  // 獲取寬度模式樣式
+  const widthStyles = getWidthModeStyles();
+  const mode = detectWidthMode();
+  const isHalfWidthMode = mode === 'half_width_mode';
+  const isMiniWidthMode = mode === 'mini_width_mode';
+  
+  // 判斷是否需要折疊
+  // half_width_mode: 標籤超過 2 個時折疊，顯示前 2 個
+  // mini_width_mode: 標籤超過 1 個時折疊，顯示前 1 個
+  const needsCollapse = (isHalfWidthMode && tagsWithReasons.length > 2) || 
+                        (isMiniWidthMode && tagsWithReasons.length > 1);
+  const visibleTagCount = isMiniWidthMode ? 1 : 2;
+  
+  container.style.cssText = `
+    display: inline-block;
+    position: relative;
+    max-width: ${widthStyles.containerMaxWidth};
+    overflow: ${widthStyles.containerOverflow};
+    text-overflow: ${widthStyles.containerTextOverflow};
+    white-space: ${widthStyles.containerWhiteSpace};
+    vertical-align: bottom;
+  `;
 
-  tagsWithReasons.forEach((item, index) => {
-    if (index > 0) {
-      const separator = document.createTextNode(', ');
-      container.appendChild(separator);
-    }
-
+  // 創建標籤顯示函數
+  const createTagElement = (item) => {
     const tagSpan = document.createElement('span');
     tagSpan.className = 'threads-clickable-tag';
     tagSpan.textContent = item.tag;
@@ -1452,9 +1562,113 @@ function createClickableTagsElement(tagsWithReasons) {
         tagSpan._currentTooltip = tooltip;
       });
     }
+    
+    return tagSpan;
+  };
 
-    container.appendChild(tagSpan);
-  });
+  if (needsCollapse) {
+    // half_width_mode: 顯示前 2 個標籤，mini_width_mode: 顯示前 1 個標籤
+    
+    // 創建可見標籤容器
+    const visibleContainer = document.createElement('span');
+    visibleContainer.className = 'threads-tags-visible';
+    
+    for (let i = 0; i < visibleTagCount; i++) {
+      if (i > 0) {
+        visibleContainer.appendChild(document.createTextNode(', '));
+      }
+      visibleContainer.appendChild(createTagElement(tagsWithReasons[i]));
+    }
+    
+    container.appendChild(visibleContainer);
+    
+    // 創建隱藏標籤容器（剩餘的）
+    const hiddenContainer = document.createElement('span');
+    hiddenContainer.className = 'threads-tags-hidden';
+    hiddenContainer.style.cssText = 'display: none; white-space: normal;';
+    
+    for (let i = visibleTagCount; i < tagsWithReasons.length; i++) {
+      hiddenContainer.appendChild(document.createTextNode(', '));
+      hiddenContainer.appendChild(createTagElement(tagsWithReasons[i]));
+    }
+    
+    container.appendChild(hiddenContainer);
+    
+    // 創建展開/收合箭頭
+    const expandArrow = document.createElement('span');
+    expandArrow.className = 'threads-expand-arrow';
+    expandArrow.textContent = ' ▼';
+    expandArrow.style.cssText = `
+      cursor: pointer;
+      pointer-events: auto;
+      font-size: 10px;
+      margin-left: 4px;
+      transition: transform 0.2s ease;
+      display: inline-block;
+    `;
+    
+    // 點擊箭頭展開（展開後箭頭消失，不提供收合選項）
+    expandArrow.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      
+      // 展開：顯示所有標籤（使用 inline 確保與前面內容連續）
+      hiddenContainer.style.display = 'inline';
+      hiddenContainer.style.whiteSpace = 'normal';
+      
+      // 隱藏箭頭
+      expandArrow.style.display = 'none';
+      
+      // 允許換行到多行，但維持寬度
+      container.style.whiteSpace = 'normal';
+      container.style.overflow = 'visible';
+      container.style.display = 'inline';  // 使用 inline 讓內容連續流動
+      container.style.maxWidth = widthStyles.containerMaxWidth;  // 維持容器寬度
+      
+      // 調整父標籤容器以支援多行
+      const labelElement = container.closest('.threads-region-label');
+      if (labelElement) {
+        labelElement.style.minHeight = '40px';
+        labelElement.style.alignItems = 'flex-start';
+        labelElement.style.paddingTop = '4px';
+        labelElement.style.paddingBottom = '4px';
+        // 不使用 flexWrap，讓按鈕保持在同一行
+        // 維持寬度限制
+        labelElement.style.maxWidth = widthStyles.labelMaxWidth;
+        labelElement.style.width = widthStyles.labelMaxWidth;  // 固定寬度
+        
+        // 調整 threads-label-text 以支援換行，並設定 flex 屬性讓它可以縮小
+        const labelTextElement = labelElement.querySelector('.threads-label-text');
+        if (labelTextElement) {
+          labelTextElement.style.whiteSpace = 'normal';
+          labelTextElement.style.display = 'inline-block';
+          labelTextElement.style.flex = '1 1 auto';  // 可以縮小
+          labelTextElement.style.minWidth = '0';  // 允許縮小到 0
+        }
+        
+        // 確保按鈕不會換行
+        const refreshBtn = labelElement.querySelector('.threads-refresh-btn');
+        if (refreshBtn) {
+          refreshBtn.style.flexShrink = '0';
+        }
+        const trustBtn = labelElement.querySelector('.threads-trust-btn');
+        if (trustBtn) {
+          trustBtn.style.flexShrink = '0';
+        }
+      }
+    });
+    
+    container.appendChild(expandArrow);
+    
+  } else {
+    // 不需要折疊：顯示所有標籤
+    tagsWithReasons.forEach((item, index) => {
+      if (index > 0) {
+        container.appendChild(document.createTextNode(', '));
+      }
+      container.appendChild(createTagElement(item));
+    });
+  }
 
   return container;
 }
@@ -1479,25 +1693,29 @@ function convertCountryNameToZhTw(countryName) {
  * @returns {string} 標籤文字
  */
 function generateLabelText(region, profile, regionQueryStatus = null) {
+  const mode = detectWidthMode();
+  const isMiniWidthMode = mode === 'mini_width_mode';
+  
   let text;
   if (region) {
     const regionZh = convertCountryNameToZhTw(region);
-    text = `所在地：${regionZh}`;
+    // mini_width_mode 時不顯示「所在地：」前綴
+    text = isMiniWidthMode ? regionZh : `所在地：${regionZh}`;
   } else if (profile) {
     // 有側寫但無地區，顯示「未揭露」
-    text = `所在地：未揭露`;
+    text = isMiniWidthMode ? `未揭露` : `所在地：未揭露`;
   } else {
     // 根據 regionQueryStatus 顯示不同文字
     if (regionQueryStatus === 'in_progress') {
-      text = `所在地：查詢中`;
+      text = isMiniWidthMode ? `查詢中` : `所在地：查詢中`;
     } else if (regionQueryStatus === 'fail_http429') {
-      text = `所在地：查詢失敗`;
+      text = isMiniWidthMode ? `查詢失敗` : `所在地：查詢失敗`;
     } else if (regionQueryStatus === 'fail_me') {
-      text = `所在地：無法查詢`;
+      text = isMiniWidthMode ? `無法查詢` : `所在地：無法查詢`;
     } else if (regionQueryStatus === 'fail_not_rollout_yet') {
-      text = `所在地：未揭露`;
+      text = isMiniWidthMode ? `未揭露` : `所在地：未揭露`;
     } else {
-      text = `所在地：待查詢`;
+      text = isMiniWidthMode ? `待查詢` : `所在地：待查詢`;
     }
   }
   if (profile) {
@@ -1520,24 +1738,28 @@ function generateLabelElement(region, profile, regionQueryStatus = null) {
   container.className = 'threads-label-text';
 
   // 地區文字
+  const mode = detectWidthMode();
+  const isMiniWidthMode = mode === 'mini_width_mode';
+  
   let locationText;
   if (region) {
     const regionZh = convertCountryNameToZhTw(region);
-    locationText = `所在地：${regionZh}`;
+    // mini_width_mode 且已查詢到地點時，不顯示「所在地：」前綴
+    locationText = isMiniWidthMode ? regionZh : `所在地：${regionZh}`;
   } else if (profile) {
-    locationText = `所在地：未揭露`;
+    locationText = isMiniWidthMode ? `未揭露` : `所在地：未揭露`;
   } else {
     // 根據 regionQueryStatus 顯示不同文字
     if (regionQueryStatus === 'in_progress') {
-      locationText = `所在地：查詢中`;
+      locationText = isMiniWidthMode ? `查詢中` : `所在地：查詢中`;
     } else if (regionQueryStatus === 'fail_http429') {
-      locationText = `所在地：查詢失敗`;
+      locationText = isMiniWidthMode ? `查詢失敗` : `所在地：查詢失敗`;
     } else if (regionQueryStatus === 'fail_me') {
-      locationText = `所在地：無法查詢`;
+      locationText = isMiniWidthMode ? `無法查詢` : `所在地：無法查詢`;
     } else if (regionQueryStatus === 'fail_not_rollout_yet') {
-      locationText = `所在地：未揭露`;
+      locationText = isMiniWidthMode ? `未揭露` : `所在地：未揭露`;
     } else {
-      locationText = `所在地：待查詢`;
+      locationText = isMiniWidthMode ? `待查詢` : `所在地：待查詢`;
     }
   }
 
@@ -1626,6 +1848,13 @@ function showRegionLabelsOnPage(regionData) {
       if (existingLabel) {
         // 更新現有標籤
 
+        // 檢查是否有展開的標籤容器（如果展開中，跳過更新以保持展開狀態）
+        const expandedTagsContainer = existingLabel.querySelector('.threads-tags-hidden[style*="display: inline"]');
+        if (expandedTagsContainer) {
+          // 標籤已展開，跳過此次更新以保持展開狀態
+          return;
+        }
+
         // 更新文字（選擇文字 span，不是三角形 span）
         const labelTextSpan = existingLabel.querySelector('.threads-label-text') || existingLabel;
         const newText = generateLabelText(region, profile, regionQueryStatus);
@@ -1697,6 +1926,11 @@ function showRegionLabelsOnPage(regionData) {
           arrowElement.style.borderRightColor = colors.backgroundColor;
         }
 
+        // 更新寬度模式樣式
+        const widthStyles = getWidthModeStyles();
+        existingLabel.style.maxWidth = widthStyles.labelMaxWidth;
+        existingLabel.style.overflow = widthStyles.labelOverflow || 'visible';
+
         // 確保標籤顯示
         existingLabel.style.display = 'inline-flex';
 
@@ -1729,6 +1963,9 @@ function showRegionLabelsOnPage(regionData) {
       const label = document.createElement('div');
       label.className = 'threads-region-label';
 
+      // 獲取寬度模式樣式
+      const widthStyles = getWidthModeStyles();
+
       // 設定樣式（左方帶小三角形突出的標籤）
       // 使用 pointer-events: none 阻止滑鼠事件觸發用戶小卡 panel
       label.style.cssText = `
@@ -1745,6 +1982,8 @@ function showRegionLabelsOnPage(regionData) {
         vertical-align: middle;
         position: relative;
         pointer-events: none;
+        max-width: ${widthStyles.labelMaxWidth};
+        overflow: ${widthStyles.labelOverflow || 'visible'};
       `;
 
       // 創建左側三角形
@@ -2718,6 +2957,12 @@ function removeRegionLabelsOnPage() {
 
   allLabels.forEach(label => {
     try {
+      // 在移除標籤前，先恢復被灰化的貼文內容
+      const parentElement = label.parentElement;
+      if (parentElement && parentElement.tagName === 'A') {
+        setPostContentColor(parentElement, false);
+      }
+      
       label.remove();
       removedCount++;
     } catch (error) {

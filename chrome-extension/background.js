@@ -2,6 +2,7 @@
 import {
   queryUserRegion,
   getQueueStatus,
+  clearQueryQueue,
   getCachedRegion,
   getAllCachedRegions,
   clearCache,
@@ -268,10 +269,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // 處理 Sidepanel 關閉事件
   if (request.action === 'sidepanelClosed') {
-    console.log('[Background] 收到 Sidepanel 關閉通知，準備移除所有標籤');
+    console.log('[Background] 收到 Sidepanel 關閉通知，準備清理隊列並移除所有標籤');
 
     (async () => {
       try {
+        // 清空查詢隊列中的待處理任務
+        const queueResult = clearQueryQueue();
+        console.log(`[Background] 已清空查詢隊列，取消 ${queueResult.clearedCount} 個待處理任務`);
+
         // 獲取所有標籤頁
         const tabs = await chrome.tabs.query({});
         let removedCount = 0;

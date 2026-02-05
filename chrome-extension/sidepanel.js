@@ -3,8 +3,7 @@ const accountInput = document.getElementById('accountInput');
 const keepTabCheckbox = document.getElementById('keepTabCheckbox');
 const keepTabFilterContainer = document.getElementById('keepTabFilterContainer');
 const keepTabFilterInput = document.getElementById('keepTabFilterInput');
-const autoQueryModeSelect = document.getElementById('autoQueryModeSelect');
-const autoQueryModeDescription = document.getElementById('autoQueryModeDescription');
+const autoQueryModeCheckbox = document.getElementById('autoQueryModeCheckbox');
 const maxConcurrentContainer = document.getElementById('maxConcurrentContainer');
 const maxConcurrentInput = document.getElementById('maxConcurrentInput');
 const llmProfileAnalysisCheckbox = document.getElementById('llmProfileAnalysisCheckbox');
@@ -15,14 +14,10 @@ const userCountElement = document.getElementById('userCount');
 const progressLabel = document.getElementById('progressLabel');
 const queryProgress = document.getElementById('queryProgress');
 const cacheCountElement = document.getElementById('cacheCount');
-const showCacheBtn = document.getElementById('showCacheBtn');
-const clearCacheBtn = document.getElementById('clearCacheBtn');
 const profileCacheCountElement = document.getElementById('profileCacheCount');
-const showProfileCacheBtn = document.getElementById('showProfileCacheBtn');
-const clearProfileCacheBtn = document.getElementById('clearProfileCacheBtn');
 const trustListCountElement = document.getElementById('trustListCount');
-const showTrustListBtn = document.getElementById('showTrustListBtn');
-const clearTrustListBtn = document.getElementById('clearTrustListBtn');
+const clearAllCacheBtn = document.getElementById('clearAllCacheBtn');
+const exportCacheBtn = document.getElementById('exportCacheBtn');
 const openaiApiKeyInput = document.getElementById('openaiApiKeyInput');
 const apiKeyStatus = document.getElementById('apiKeyStatus');
 const apiKeySetIndicator = document.getElementById('apiKeySetIndicator');
@@ -235,7 +230,6 @@ async function updateTrustListStats() {
   if (!trustListCountElement) return;
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    
     if (!tab || !tab.url || !tab.url.includes('threads.com')) {
       trustListCountElement.textContent = '0';
       return;
@@ -246,9 +240,7 @@ async function updateTrustListStats() {
     });
 
     if (response && response.success) {
-      const count = response.count || 0;
-      trustListCountElement.textContent = count;
-      console.log(`[Sidepanel] 手動信任清單統計更新: ${count}`);
+      trustListCountElement.textContent = response.count || 0;
     } else {
       trustListCountElement.textContent = '0';
     }
@@ -257,6 +249,7 @@ async function updateTrustListStats() {
     trustListCountElement.textContent = '0';
   }
 }
+
 
 // ==================== 查詢函數 ====================
 
@@ -688,6 +681,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
   }
 
+  // 處理手動標注清單變更通知
+  if (request.action === 'trustListChanged') {
+    console.log('[Sidepanel] 收到手動標注清單變更通知，更新統計');
+    updateTrustListStats();
+    sendResponse({ success: true });
+    return true;
+  }
+
   // 處理側寫分析（從 background.js 的整合查詢觸發）
   if (request.action === 'processProfileAnalysis') {
     const { account, profileData } = request;
@@ -788,9 +789,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }, 500);
     
     // 如果「自動查詢」選項不是關閉狀態，自動關閉它
-    if (autoQueryModeSelect && autoQueryModeSelect.value !== 'off') {
+    if (autoQueryModeCheckbox && autoQueryModeCheckbox.checked) {
       console.log('[Sidepanel] 自動關閉「自動查詢」選項');
-      autoQueryModeSelect.value = 'off';
+      autoQueryModeCheckbox.checked = false;
       
       // 保存到 chrome.storage
       chrome.storage.local.set({ autoQueryMode: 'off' }, () => {
@@ -833,12 +834,12 @@ chrome.storage.local.get(['keepTabAfterQuery', 'keepTabFilter', 'autoQueryMode',
   
   // 處理自動查詢模式設定（支援從舊版 autoQueryVisible 遷移）
   if (result.autoQueryMode !== undefined) {
-    autoQueryModeSelect.value = result.autoQueryMode;
+    autoQueryModeCheckbox.checked = (result.autoQueryMode === 'smart');
     console.log('[Sidepanel] 載入自動查詢模式設定:', result.autoQueryMode);
   } else if (result.autoQueryVisible !== undefined) {
-    // 從舊版設定遷移：autoQueryVisible: true 對應到 'visible' 模式
-    const migratedMode = result.autoQueryVisible ? 'visible' : 'off';
-    autoQueryModeSelect.value = migratedMode;
+    // 從舊版設定遷移：autoQueryVisible: true 對應到 'smart' 模式
+    autoQueryModeCheckbox.checked = result.autoQueryVisible;
+    const migratedMode = result.autoQueryVisible ? 'smart' : 'off';
     // 保存新格式並移除舊設定
     chrome.storage.local.set({ autoQueryMode: migratedMode }, () => {
       console.log('[Sidepanel] 從舊版遷移自動查詢設定:', migratedMode);
@@ -846,7 +847,7 @@ chrome.storage.local.get(['keepTabAfterQuery', 'keepTabFilter', 'autoQueryMode',
     chrome.storage.local.remove('autoQueryVisible');
   } else {
     // 預設為 smart 模式
-    autoQueryModeSelect.value = 'smart';
+    autoQueryModeCheckbox.checked = true;
     // 保存預設值到 storage
     chrome.storage.local.set({ autoQueryMode: 'smart' }, () => {
       console.log('[Sidepanel] 初始化自動查詢模式預設值: smart');
@@ -854,10 +855,7 @@ chrome.storage.local.get(['keepTabAfterQuery', 'keepTabFilter', 'autoQueryMode',
   }
   
   // 根據自動查詢模式顯示/隱藏最大並行查詢數輸入框
-  maxConcurrentContainer.style.display = (autoQueryModeSelect.value !== 'off') ? 'block' : 'none';
-  
-  // 更新說明文字
-  updateAutoQueryModeDescription();
+  maxConcurrentContainer.style.display = autoQueryModeCheckbox.checked ? 'block' : 'none';
   
   if (result.maxConcurrentQueries !== undefined) {
     maxConcurrentInput.value = result.maxConcurrentQueries;
@@ -888,27 +886,14 @@ keepTabFilterInput.addEventListener('change', () => {
   });
 });
 
-// 更新自動查詢模式說明文字
-function updateAutoQueryModeDescription() {
-  const mode = autoQueryModeSelect.value;
-  const descriptions = {
-    'off': '僅作手動查詢',
-    'smart': '預先針對高互動陌生帳號自動做查詢',
-    'visible': '當顯示在頁面時，自動做查詢'
-  };
-  autoQueryModeDescription.textContent = descriptions[mode] || '';
-}
-
-// 監聽 autoQueryModeSelect 變化，保存到 chrome.storage
-autoQueryModeSelect.addEventListener('change', () => {
-  const mode = autoQueryModeSelect.value;
+// 監聽 autoQueryModeCheckbox 變化，保存到 chrome.storage
+autoQueryModeCheckbox.addEventListener('change', () => {
+  const mode = autoQueryModeCheckbox.checked ? 'smart' : 'off';
   chrome.storage.local.set({ autoQueryMode: mode }, () => {
     console.log('[Sidepanel] 保存自動查詢模式設定:', mode);
   });
-  // 顯示/隱藏最大並行查詢數輸入框（只有在非關閉模式時顯示）
-  maxConcurrentContainer.style.display = (mode !== 'off') ? 'block' : 'none';
-  // 更新說明文字
-  updateAutoQueryModeDescription();
+  // 顯示/隱藏最大並行查詢數輸入框（只有在啟用時顯示）
+  maxConcurrentContainer.style.display = autoQueryModeCheckbox.checked ? 'block' : 'none';
 });
 
 // 監聽 maxConcurrentInput 變化，保存到 chrome.storage 並通知 background 更新 queryManager
@@ -1191,6 +1176,41 @@ chrome.storage.local.get(['openaiApiKey', 'claudeApiKey', 'openrouterApiKey', 'o
   
   // 初始化後更新顯示狀態
   updateLLMProviderUI();
+  
+  // 第一次安裝檢測：如果 llmProvider 從未設定過，且本機 LLM 可用，自動啟用
+  if (!result.llmProvider && result.llmProvider !== '') {
+    console.log('[Sidepanel] 偵測到第一次安裝，檢查本機 LLM 可用性...');
+    
+    (async () => {
+      try {
+        if (typeof window.checkLLMAvailability !== 'function') {
+          console.log('[Sidepanel] LLM 檢查函數尚未載入，跳過自動設定');
+          return;
+        }
+        
+        const availabilityResult = await window.checkLLMAvailability();
+        
+        if (availabilityResult.available) {
+          console.log('[Sidepanel] 本機 LLM 可用，自動啟用帳號行為分析功能');
+          
+          chrome.storage.local.set({
+            llmProvider: 'local',
+            useLocalLLM: true,
+            llmProfileAnalysis: true
+          }, () => {
+            llmProviderSelect.value = 'local';
+            llmProfileAnalysisCheckbox.checked = true;
+            updateLLMProviderUI();
+            console.log('[Sidepanel] 已自動設定：llmProvider=local, llmProfileAnalysis=true');
+          });
+        } else {
+          console.log('[Sidepanel] 本機 LLM 不可用，狀態:', availabilityResult.status);
+        }
+      } catch (error) {
+        console.error('[Sidepanel] 第一次安裝自動設定失敗:', error);
+      }
+    })();
+  }
 });
 
 // 當 API Key 輸入框內容變化時，自動儲存
@@ -1352,93 +1372,63 @@ openrouterModelInput.addEventListener('input', () => {
   }, 500);
 });
 
-// ==================== 顯示/清除快取按鈕 ====================
+// ==================== 統一快取管理按鈕 ====================
 
-// 監聽顯示快取按鈕點擊
-showCacheBtn.addEventListener('click', async () => {
-  try {
-    console.log('[Sidepanel] 顯示快取按鈕被點擊');
-    updateStatus('正在讀取本機資料...', 'info');
-
-    // 禁用按鈕防止重複點擊
-    showCacheBtn.disabled = true;
-    showCacheBtn.textContent = '讀取中...';
-
-    // 發送獲取快取請求
-    const response = await chrome.runtime.sendMessage({
-      action: 'getAllCachedRegions'
-    });
-
-    if (response && response.success) {
-      const cache = response.cache || {};
-      const entries = Object.entries(cache);
-      
-      if (entries.length === 0) {
-        contentOutput.value = '本機沒有儲存任何用戶所在地資料';
-        updateStatus('本機資料為空', 'info');
-      } else {
-        // 格式化輸出
-        const output = entries.map(([account, data]) => {
-          const region = data.region || '未知';
-          return `${account}: ${region}`;
-        }).join('\n');
-        
-        contentOutput.value = `本機儲存的用戶所在地資料 (共 ${entries.length} 筆):\n\n${output}`;
-        updateStatus(`已載入 ${entries.length} 筆本機資料`, 'success');
-      }
-    } else {
-      contentOutput.value = `讀取失敗: ${response?.error || '未知錯誤'}`;
-      updateStatus(`讀取失敗: ${response?.error || '未知錯誤'}`, 'error');
-    }
-
-    // 恢復按鈕狀態
-    showCacheBtn.disabled = false;
-    showCacheBtn.textContent = '顯示';
-
-  } catch (error) {
-    console.error('[Sidepanel] 讀取快取錯誤:', error);
-    updateStatus(`讀取快取錯誤: ${error.message}`, 'error');
-    contentOutput.value = `讀取錯誤: ${error.message}`;
-
-    // 恢復按鈕狀態
-    showCacheBtn.disabled = false;
-    showCacheBtn.textContent = '顯示';
-  }
-});
-
-// 監聽清除快取按鈕點擊
-clearCacheBtn.addEventListener('click', async () => {
+// 監聽清除所有快取按鈕點擊
+clearAllCacheBtn.addEventListener('click', async () => {
   try {
     // 顯示確認對話框
-    const confirmed = confirm('確定要清除所有本機保存的用戶所在地資料嗎？\n\n此操作無法復原。');
+    const confirmed = confirm('確定要清除所有本機保存的快取資料嗎？\n\n包含：\n- 用戶所在地資料\n- 用戶側寫資料\n- 手動信任清單\n\n此操作無法復原。');
 
     if (!confirmed) {
       console.log('[Sidepanel] 用戶取消清除快取');
       return;
     }
 
-    console.log('[Sidepanel] 清除快取按鈕被點擊');
-    updateStatus('正在清除本機資料...', 'info');
+    console.log('[Sidepanel] 清除所有快取按鈕被點擊');
+    updateStatus('正在清除所有快取資料...', 'info');
 
     // 禁用按鈕防止重複點擊
-    clearCacheBtn.disabled = true;
-    clearCacheBtn.textContent = '清除中...';
+    clearAllCacheBtn.disabled = true;
+    clearAllCacheBtn.textContent = '清除中...';
 
-    // 發送清除快取請求
-    const response = await chrome.runtime.sendMessage({
+    // 清除用戶所在地快取
+    const regionResponse = await chrome.runtime.sendMessage({
       action: 'clearCache'
     });
 
-    if (response && response.success) {
-      updateStatus('本機資料已清除', 'success');
+    // 清除用戶側寫快取
+    const profileResponse = await chrome.runtime.sendMessage({
+      action: 'clearProfileCache'
+    });
+
+    // 清除手動信任清單
+    let trustListCleared = false;
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab && tab.url && tab.url.includes('threads.com')) {
+        const trustResponse = await chrome.tabs.sendMessage(tab.id, {
+          action: 'clearTrustList'
+        });
+        trustListCleared = trustResponse && trustResponse.success;
+      }
+    } catch (error) {
+      console.log('[Sidepanel] 清除手動信任清單失敗（可能未開啟 Threads 頁面）:', error);
+    }
+
+    if (regionResponse && regionResponse.success && profileResponse && profileResponse.success) {
+      updateStatus('所有快取資料已清除', 'success');
 
       // 更新快取統計顯示
       await updateCacheStats();
+      await updateProfileCacheStats();
+      await updateTrustListStats();
 
-      // 清除當前用戶列表中的 region 資料（保留用戶名）
+      // 清除當前用戶列表中的資料（保留用戶名）
       currentGetUserListArray = currentGetUserListArray.map(user => ({
         account: user.account,
-        region: null
+        region: null,
+        profile: null
       }));
 
       // 更新顯示
@@ -1447,252 +1437,192 @@ clearCacheBtn.addEventListener('click', async () => {
         return `[${index}] ${user.account}`;
       }).join('\n');
 
-      console.log('[Sidepanel] 快取已清除，用戶列表已重置');
+      console.log('[Sidepanel] 所有快取已清除，用戶列表已重置');
     } else {
-      updateStatus(`清除失敗: ${response?.error || '未知錯誤'}`, 'error');
+      updateStatus(`清除失敗: 部分資料清除失敗`, 'error');
     }
 
     // 恢復按鈕狀態
-    clearCacheBtn.disabled = false;
-    clearCacheBtn.textContent = '清除';
+    clearAllCacheBtn.disabled = false;
+    clearAllCacheBtn.textContent = '清除';
 
   } catch (error) {
     console.error('[Sidepanel] 清除快取錯誤:', error);
     updateStatus(`清除快取錯誤: ${error.message}`, 'error');
 
     // 恢復按鈕狀態
-    clearCacheBtn.disabled = false;
-    clearCacheBtn.textContent = '清除';
+    clearAllCacheBtn.disabled = false;
+    clearAllCacheBtn.textContent = '清除';
   }
 });
 
-// ==================== 顯示/清除側寫快取按鈕 ====================
+/**
+ * 計算資料的 SHA-256 雜湊值
+ * @param {string} data - 要計算雜湊的字串
+ * @returns {Promise<string>} 十六進位格式的雜湊值
+ */
+async function calculateHash(data) {
+  const encoder = new TextEncoder();
+  const dataBuffer = encoder.encode(data);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return hashHex;
+}
 
-// 監聽顯示側寫快取按鈕點擊
-showProfileCacheBtn.addEventListener('click', async () => {
+/**
+ * 匯出快取資料為 JSON 檔案
+ * 包含所在地資料、用戶側寫資料、手動標注清單，以及用於驗證的雜湊值
+ */
+async function exportCacheData() {
+  console.log('[Sidepanel] 開始匯出快取資料...');
+  updateStatus('正在收集快取資料...', 'info');
+
+  // 1. 獲取所在地快取資料
+  let locationData = [];
   try {
-    console.log('[Sidepanel] 顯示側寫快取按鈕被點擊');
-    updateStatus('正在讀取側寫資料...', 'info');
+    const regionResponse = await chrome.runtime.sendMessage({
+      action: 'getAllCachedRegions'
+    });
+    if (regionResponse && regionResponse.success && regionResponse.cache) {
+      locationData = Object.entries(regionResponse.cache).map(([username, data]) => ({
+        username: username,
+        region: data.region,
+        timestamp: data.timestamp || null
+      }));
+    }
+    console.log(`[Sidepanel] 獲取所在地資料: ${locationData.length} 筆`);
+  } catch (error) {
+    console.error('[Sidepanel] 獲取所在地快取失敗:', error);
+  }
 
-    // 禁用按鈕防止重複點擊
-    showProfileCacheBtn.disabled = true;
-    showProfileCacheBtn.textContent = '讀取中...';
-
-    // 發送獲取側寫快取請求
-    const response = await chrome.runtime.sendMessage({
+  // 2. 獲取用戶側寫快取資料
+  let userProfileData = [];
+  try {
+    const profileResponse = await chrome.runtime.sendMessage({
       action: 'getAllCachedProfiles'
     });
-
-    if (response && response.success) {
-      const cache = response.cache || {};
-      const entries = Object.entries(cache);
-      
-      if (entries.length === 0) {
-        contentOutput.value = '本機沒有儲存任何用戶側寫資料';
-        updateStatus('側寫資料為空', 'info');
-      } else {
-        // 格式化輸出
-        const output = entries.map(([account, data]) => {
-          const profile = data.profile || '未知';
-          return `${account}: ${profile}`;
-        }).join('\n');
-        
-        contentOutput.value = `本機儲存的用戶側寫資料 (共 ${entries.length} 筆):\n\n${output}`;
-        updateStatus(`已載入 ${entries.length} 筆側寫資料`, 'success');
-      }
-    } else {
-      contentOutput.value = `讀取失敗: ${response?.error || '未知錯誤'}`;
-      updateStatus(`讀取失敗: ${response?.error || '未知錯誤'}`, 'error');
-    }
-
-    // 恢復按鈕狀態
-    showProfileCacheBtn.disabled = false;
-    showProfileCacheBtn.textContent = '顯示';
-
-  } catch (error) {
-    console.error('[Sidepanel] 讀取側寫快取錯誤:', error);
-    updateStatus(`讀取側寫快取錯誤: ${error.message}`, 'error');
-    contentOutput.value = `讀取錯誤: ${error.message}`;
-
-    // 恢復按鈕狀態
-    showProfileCacheBtn.disabled = false;
-    showProfileCacheBtn.textContent = '顯示';
-  }
-});
-
-// 監聽清除側寫快取按鈕點擊
-clearProfileCacheBtn.addEventListener('click', async () => {
-  try {
-    // 顯示確認對話框
-    const confirmed = confirm('確定要清除所有本機保存的用戶側寫資料嗎？\n\n此操作無法復原。');
-
-    if (!confirmed) {
-      console.log('[Sidepanel] 用戶取消清除側寫快取');
-      return;
-    }
-
-    console.log('[Sidepanel] 清除側寫快取按鈕被點擊');
-    updateStatus('正在清除側寫資料...', 'info');
-
-    // 禁用按鈕防止重複點擊
-    clearProfileCacheBtn.disabled = true;
-    clearProfileCacheBtn.textContent = '清除中...';
-
-    // 發送清除側寫快取請求
-    const response = await chrome.runtime.sendMessage({
-      action: 'clearProfileCache'
-    });
-
-    if (response && response.success) {
-      updateStatus('側寫資料已清除', 'success');
-
-      // 更新側寫快取統計顯示
-      await updateProfileCacheStats();
-
-      // 清除當前用戶列表中的 profile 資料（保留其他資料）
-      currentGetUserListArray = currentGetUserListArray.map(user => ({
-        account: user.account,
-        region: user.region,
-        profile: null
+    if (profileResponse && profileResponse.success && profileResponse.cache) {
+      userProfileData = Object.entries(profileResponse.cache).map(([username, data]) => ({
+        username: username,
+        profile: data.profile,
+        timestamp: data.timestamp || null
       }));
-
-      console.log('[Sidepanel] 側寫快取已清除，用戶列表已重置');
-    } else {
-      updateStatus(`清除失敗: ${response?.error || '未知錯誤'}`, 'error');
     }
-
-    // 恢復按鈕狀態
-    clearProfileCacheBtn.disabled = false;
-    clearProfileCacheBtn.textContent = '清除';
-
+    console.log(`[Sidepanel] 獲取用戶側寫資料: ${userProfileData.length} 筆`);
   } catch (error) {
-    console.error('[Sidepanel] 清除側寫快取錯誤:', error);
-    updateStatus(`清除側寫快取錯誤: ${error.message}`, 'error');
-
-    // 恢復按鈕狀態
-    clearProfileCacheBtn.disabled = false;
-    clearProfileCacheBtn.textContent = '清除';
+    console.error('[Sidepanel] 獲取用戶側寫快取失敗:', error);
   }
-});
 
-// ==================== 顯示/清除手動信任清單按鈕 ====================
-
-// 監聽顯示手動信任清單按鈕點擊
-showTrustListBtn.addEventListener('click', async () => {
+  // 3. 獲取手動標注清單
+  let userMarkAllow = [];
   try {
-    console.log('[Sidepanel] 顯示手動信任清單按鈕被點擊');
-    updateStatus('正在讀取手動信任清單...', 'info');
-
-    // 禁用按鈕防止重複點擊
-    showTrustListBtn.disabled = true;
-    showTrustListBtn.textContent = '讀取中...';
-
-    // 獲取當前活動標籤頁
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-    if (!tab || !tab.url || !tab.url.includes('threads.com')) {
-      contentOutput.value = '請先開啟 Threads 頁面';
-      updateStatus('請先開啟 Threads 頁面', 'error');
-      showTrustListBtn.disabled = false;
-      showTrustListBtn.textContent = '顯示';
-      return;
-    }
-
-    // 發送獲取手動信任清單請求
-    const response = await chrome.tabs.sendMessage(tab.id, {
-      action: 'getAllTrustList'
-    });
-
-    if (response && response.success) {
-      const trustList = response.trustList || [];
-      
-      if (trustList.length === 0) {
-        contentOutput.value = '手動信任清單為空';
-        updateStatus('手動信任清單為空', 'info');
-      } else {
-        // 格式化輸出
-        const output = trustList.map((account, index) => {
-          return `[${index + 1}] ${account}`;
-        }).join('\n');
-        
-        contentOutput.value = `手動信任清單 (共 ${trustList.length} 個用戶):\n\n${output}`;
-        updateStatus(`已載入 ${trustList.length} 個信任用戶`, 'success');
+    if (tab && tab.url && tab.url.includes('threads.com')) {
+      const trustResponse = await chrome.tabs.sendMessage(tab.id, {
+        action: 'getAllTrustList'
+      });
+      if (trustResponse && trustResponse.success && trustResponse.trustList) {
+        userMarkAllow = trustResponse.trustList;
       }
-    } else {
-      contentOutput.value = `讀取失敗: ${response?.error || '未知錯誤'}`;
-      updateStatus(`讀取失敗: ${response?.error || '未知錯誤'}`, 'error');
     }
-
-    // 恢復按鈕狀態
-    showTrustListBtn.disabled = false;
-    showTrustListBtn.textContent = '顯示';
-
+    console.log(`[Sidepanel] 獲取手動標注清單: ${userMarkAllow.length} 筆`);
   } catch (error) {
-    console.error('[Sidepanel] 讀取手動信任清單錯誤:', error);
-    updateStatus(`讀取錯誤: ${error.message}`, 'error');
-    contentOutput.value = `讀取錯誤: ${error.message}`;
-
-    // 恢復按鈕狀態
-    showTrustListBtn.disabled = false;
-    showTrustListBtn.textContent = '顯示';
+    console.log('[Sidepanel] 獲取手動標注清單失敗（可能未開啟 Threads 頁面）:', error);
   }
-});
 
-// 監聽清除手動信任清單按鈕點擊
-clearTrustListBtn.addEventListener('click', async () => {
+  // 4. 產生時間戳記
+  const timestamp = new Date().toISOString();
+
+  // 5. 計算雜湊值（用於驗證資料完整性）
+  // 將資料排序後序列化，確保相同資料產生相同雜湊
+  const dataForHash = {
+    LocationData: locationData.sort((a, b) => a.username.localeCompare(b.username)),
+    UserProfileData: userProfileData.sort((a, b) => a.username.localeCompare(b.username)),
+    UserMarkAllow: userMarkAllow.sort()
+  };
+  const dataString = JSON.stringify(dataForHash);
+  const hash = await calculateHash(dataString);
+  console.log(`[Sidepanel] 計算雜湊值: ${hash}`);
+
+  // 6. 組合匯出資料
+  const exportData = {
+    LocationData: locationData,
+    UserProfileData: userProfileData,
+    UserMarkAllow: userMarkAllow,
+    Hash: hash,
+    Timestamp: timestamp
+  };
+
+  return exportData;
+}
+
+/**
+ * 下載 JSON 檔案
+ * @param {Object} data - 要下載的資料物件
+ * @param {string} filename - 檔案名稱
+ */
+function downloadJSON(data, filename) {
+  const jsonString = JSON.stringify(data, null, 2);
+  const blob = new Blob([jsonString], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// 監聽匯出快取按鈕點擊
+exportCacheBtn.addEventListener('click', async () => {
   try {
-    // 顯示確認對話框
-    const confirmed = confirm('確定要清除所有手動信任的用戶嗎？\n\n此操作無法復原。');
-
-    if (!confirmed) {
-      console.log('[Sidepanel] 用戶取消清除手動信任清單');
-      return;
-    }
-
-    console.log('[Sidepanel] 清除手動信任清單按鈕被點擊');
-    updateStatus('正在清除手動信任清單...', 'info');
+    console.log('[Sidepanel] 匯出快取按鈕被點擊');
+    updateStatus('準備匯出快取資料...', 'info');
 
     // 禁用按鈕防止重複點擊
-    clearTrustListBtn.disabled = true;
-    clearTrustListBtn.textContent = '清除中...';
+    exportCacheBtn.disabled = true;
+    exportCacheBtn.textContent = '匯出中...';
 
-    // 獲取當前活動標籤頁
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    // 執行匯出
+    const exportData = await exportCacheData();
 
-    if (!tab || !tab.url || !tab.url.includes('threads.com')) {
-      updateStatus('請先開啟 Threads 頁面', 'error');
-      clearTrustListBtn.disabled = false;
-      clearTrustListBtn.textContent = '清除';
-      return;
-    }
+    // 產生檔案名稱（包含時間戳記）
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename = `user-profile-export-${timestamp}.json`;
 
-    // 發送清除手動信任清單請求
-    const response = await chrome.tabs.sendMessage(tab.id, {
-      action: 'clearTrustList'
-    });
+    // 下載檔案
+    downloadJSON(exportData, filename);
 
-    if (response && response.success) {
-      updateStatus('手動信任清單已清除', 'success');
+    // 更新狀態
+    const totalCount = exportData.LocationData.length + 
+                       exportData.UserProfileData.length + 
+                       exportData.UserMarkAllow.length;
+    updateStatus(`匯出成功: ${filename}`, 'success');
+    contentOutput.value = `匯出完成！\n\n` +
+      `檔案名稱: ${filename}\n\n` +
+      `匯出內容:\n` +
+      `- 所在地資料: ${exportData.LocationData.length} 筆\n` +
+      `- 用戶側寫資料: ${exportData.UserProfileData.length} 筆\n` +
+      `- 手動標注清單: ${exportData.UserMarkAllow.length} 筆\n\n` +
+      `雜湊值 (SHA-256):\n${exportData.Hash}\n\n` +
+      `匯入者可使用此雜湊值驗證資料完整性`;
 
-      // 更新手動信任清單統計顯示
-      await updateTrustListStats();
-
-      console.log('[Sidepanel] 手動信任清單已清除');
-    } else {
-      updateStatus(`清除失敗: ${response?.error || '未知錯誤'}`, 'error');
-    }
+    console.log(`[Sidepanel] 匯出成功: ${filename}, 共 ${totalCount} 筆資料`);
 
     // 恢復按鈕狀態
-    clearTrustListBtn.disabled = false;
-    clearTrustListBtn.textContent = '清除';
+    exportCacheBtn.disabled = false;
+    exportCacheBtn.textContent = '匯出';
 
   } catch (error) {
-    console.error('[Sidepanel] 清除手動信任清單錯誤:', error);
-    updateStatus(`清除錯誤: ${error.message}`, 'error');
+    console.error('[Sidepanel] 匯出快取錯誤:', error);
+    updateStatus(`匯出錯誤: ${error.message}`, 'error');
 
     // 恢復按鈕狀態
-    clearTrustListBtn.disabled = false;
-    clearTrustListBtn.textContent = '清除';
+    exportCacheBtn.disabled = false;
+    exportCacheBtn.textContent = '匯出';
   }
 });
 
@@ -1868,9 +1798,9 @@ profileCacheCountElement.addEventListener('click', async () => {
   }
 });
 
-// 點擊手動信任清單統計數字可手動刷新
+// 點擊手動標注統計數字可手動刷新
 trustListCountElement.addEventListener('click', async () => {
-  console.log('[Sidepanel] 用戶點擊手動信任清單統計，手動刷新');
+  console.log('[Sidepanel] 用戶點擊手動標注統計，手動刷新');
 
   // 顯示刷新動畫
   const originalText = trustListCountElement.textContent;
@@ -1880,9 +1810,10 @@ trustListCountElement.addEventListener('click', async () => {
 
   // 如果刷新後數字沒變，顯示一個提示
   if (trustListCountElement.textContent === originalText) {
-    console.log('[Sidepanel] 手動信任清單統計已是最新');
+    console.log('[Sidepanel] 手動標注統計已是最新');
   }
 });
+
 
 // ==================== Sidepanel 關閉時清理 ====================
 
@@ -1922,5 +1853,57 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     console.log('[Sidepanel] Sidepanel 已隱藏');
     cleanupOnClose();
+  }
+});
+
+// ==================== 輪播圖功能 ====================
+
+let currentCarouselIndex = 0;
+const carouselImages = document.querySelectorAll('.carousel-image');
+const carouselIndicators = document.querySelectorAll('.carousel-indicator');
+const carouselPrevBtn = document.getElementById('carouselPrev');
+const carouselNextBtn = document.getElementById('carouselNext');
+
+function showCarouselImage(index) {
+  const carouselTrack = document.querySelector('.carousel-track');
+  const offset = -index * 100;
+  carouselTrack.style.transform = `translateX(${offset}%)`;
+
+  carouselIndicators.forEach((indicator, i) => {
+    if (i === index) {
+      indicator.classList.add('active');
+    } else {
+      indicator.classList.remove('active');
+    }
+  });
+
+  currentCarouselIndex = index;
+}
+
+function nextCarouselImage() {
+  const nextIndex = (currentCarouselIndex + 1) % carouselImages.length;
+  showCarouselImage(nextIndex);
+}
+
+function prevCarouselImage() {
+  const prevIndex = (currentCarouselIndex - 1 + carouselImages.length) % carouselImages.length;
+  showCarouselImage(prevIndex);
+}
+
+carouselPrevBtn.addEventListener('click', prevCarouselImage);
+carouselNextBtn.addEventListener('click', nextCarouselImage);
+
+carouselIndicators.forEach((indicator, index) => {
+  indicator.addEventListener('click', () => {
+    showCarouselImage(index);
+  });
+});
+
+// 鍵盤左右鍵支援
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'ArrowLeft') {
+    prevCarouselImage();
+  } else if (event.key === 'ArrowRight') {
+    nextCarouselImage();
   }
 });
